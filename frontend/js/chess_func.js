@@ -6,6 +6,7 @@ const game_state = {
     castling: {'K': true, 'Q': true, 'k': true, 'q': true},
     king_in_check: false,
     checkmate: null,
+    draw: false,
     white_player: null,
     black_player: null
 }
@@ -263,7 +264,8 @@ function draw_possible_moves(piece) {
     })
 }
 
-async function move_piece(moves, event, piece, no_confirmation = false) {
+async function move_piece(moves, event, piece, no_confirmation = false, promote = undefined) {
+    if (game_state.draw !== null || game_state.checkmate != null) return;
 
     if (no_confirmation) {
         nearest_square = event
@@ -308,10 +310,15 @@ async function move_piece(moves, event, piece, no_confirmation = false) {
     }
 
     // check if promotion
-    let promote_piece_id = null;
-    if (piece.attr("fen").toLowerCase() == "p" && (nearest_square.attr("id")[1] == "1" || nearest_square.attr("id")[1] == "8")) {
-        promote_piece_id = await promote_popup(piece.attr("fen").charCodeAt(0) < 91 ? "w" : "b");
+    let promote_piece_id = null
+    if (!no_confirmation) {
+        if (piece.attr("fen").toLowerCase() == "p" && (nearest_square.attr("id")[1] == "1" || nearest_square.attr("id")[1] == "8")) {
+            promote_piece_id = await promote_popup(piece.attr("fen").charCodeAt(0) < 91 ? "w" : "b");
+        }
+    } else {
+        promote_piece_id = promote !== undefined ? promote : null;
     }
+
 
     if (!no_confirmation) {
         send_message("move-piece", {
@@ -347,7 +354,6 @@ async function move_piece(moves, event, piece, no_confirmation = false) {
     }
 
     pos_x_idx = piece.attr("pos")[0].charCodeAt(0) - 'A'.charCodeAt(0)
-    console.log(piece_on_square)
     if (!piece_on_square.empty() && piece_on_square !== piece) {
         // if piece of the same color, return to initial position: check if the both fen are uppercase or lowercase 
         is_upper = piece.attr("fen").charCodeAt(0) < 91;
@@ -398,6 +404,13 @@ async function move_piece(moves, event, piece, no_confirmation = false) {
 
     piece = piece;
 
+        // light the previous square
+    d3.selectAll("rect.moved").classed("moved", false);
+    previous_square = d3.select(`rect#${piece.attr("pos")}`);
+    previous_square.classed("moved", true);
+    // highlight current box
+    nearest_square.classed("moved", true);
+
     piece.attr("pos", nearest_square.attr("id"));
     piece.attr("initial-pos", `translate(${nearest_square.attr("x")}, ${nearest_square.attr("y")})`);
 }
@@ -441,6 +454,20 @@ function end_game() {
 
     loosing_king_square.attr("stroke", "red").attr("stroke-width", 4);
     winning_king_square.attr("stroke", "green").attr("stroke-width", 4);
+}
+
+function stalemate() {
+    king1 = d3.select(`g#board-pieces g[fen="K"]`);
+    king2 = d3.select(`g#board-pieces g[fen="k"]`);
+    king1_square = d3.select(`rect#${king1.attr("pos")}`);
+    king2_square = d3.select(`rect#${king2.attr("pos")}`);
+
+    new Audio("../media/game-end.webm").play();
+
+    king1_square.attr("stroke", "yellow").attr("stroke-width", 4);
+    king2_square.attr("stroke", "yellow").attr("stroke-width", 4);
+
+    alert(game_state.draw)
 }
 
 function promote_popup(color) {

@@ -11,9 +11,37 @@ main {
 
 .board-container #board rect.highlight {
     stroke-width: 4px;
-    stroke: #fff;
+    stroke: var(--accent-color);
+}
+
+.board-container #board rect.moved[color="white"] { 
+    fill: #F6EA7B;
+    stroke: #F6EA7B;
+}
+.board-container #board rect.moved[color="black"] { 
+    fill: #DCC351;
+    stroke: #DCC351;
 }
 
 .board-container #board g#board-pieces > g {
     cursor: pointer;
+}
+
+.form {
+    display: flex;
+    gap: 10px;
+    margin: 20px;
+    flex-direction: column;
+}
+
+.pop-up:has(.form) {
+    min-width: 40vw;
+}
+
+.form > div {
+    border: solid var(--accent-color);
+    padding: 10px;
+    border-radius: 2px;
+    display: flex;
+    gap: 10px;
 }

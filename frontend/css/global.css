@@ -10,12 +10,13 @@
 
     --background-color: #f8f9fa;
     --second-background-color: #e9ecef;
-    --accent-color: #007bff;
+    --accent-color: #6acc4c;
 
     --danger-color: #af2c35;
     --danger-color-light: #e99093;
     --success-color: #2c9f2c;
     --success-color-light: #9ddc9d;
+    --secondary-color: #3075b6;
     --secondary-color-light: #7793ca;
     --warning-color: #9f8625;
 
@@ -226,4 +227,26 @@ button.next-button {
     width: fit-content;
     min-width: 200px;
     margin: 6px;
+}
+
+.btn {
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: solid 2px var(--secondary-color);
+    width: fit-content;
+    background: var(--background-color);
+    color: #333;
+    cursor: pointer;
+    transition: transform 0.2s;
+    margin: 6px;
+}
+
+.btn:hover {
+    transform: scale(1.05);
+}
+
+.group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }

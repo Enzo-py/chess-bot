@@ -48,15 +48,23 @@ function read_confirm_move(data) {
     // data
     game_state.king_in_check = data.king_in_check;
     game_state.checkmate = data.checkmate;
+    game_state.draw = data.draw;
+    if (game_state.draw) stalemate();
     update_game_state(data.FEN);
 }
 
 function read_ai_move(data) {
     // data
+
     game_state.king_in_check = data.king_in_check;
     game_state.checkmate = data.checkmate;
+    game_state.draw = data.draw;
+    if (game_state.draw !== null) stalemate();
+
     update_game_state(data.FEN);
     piece = d3.select(`svg#board #board-pieces [pos="${data.from}"]`);
+    promote = data.promote === undefined || data.promote === null ? undefined : (game_state.turn === "w" ? data.promote.toLowerCase() : data.promote.toUpperCase());
     let rect = d3.select(`svg#board #board-boxes #${data.to}`);
-    move_piece(null, rect, piece, true);
+    move_piece(null, rect, piece, true, promote);
 }
+
