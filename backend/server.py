@@ -122,8 +122,17 @@ class Server:
             # reset turn
             self.focused_game.current_player = Player.WHITE if self.focused_game.current_player == Player.BLACK else Player.BLACK
             return
+        
+        if info["promote_to"] is not None:
+            self.focused_game.board.promote(info["end"], info["promote_to"])
 
-        asyncio.create_task(self.server.broadcast(protocol.Message("confirm-move", {'FEN': self.focused_game.to_FEN()}).to_json()))
+        ctn = {
+            "FEN": self.focused_game.to_FEN(),
+            "king_in_check": self.focused_game.board.king_in_check['w'] or self.focused_game.board.king_in_check['b'],
+            "checkmate": self.focused_game.board.checkmate
+        }
+
+        asyncio.create_task(self.server.broadcast(protocol.Message("confirm-move", ctn).to_json()))
 
 if __name__ == "__main__":
     Server = Server()

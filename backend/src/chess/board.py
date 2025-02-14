@@ -34,6 +34,19 @@ class Board:
         self.black_pieces = set()
 
         self.en_passant = None
+        self.available_castling = {
+            Player.WHITE: {"king": True, "queen": True},
+            Player.BLACK: {"king": True, "queen": True}
+        }
+
+        self.king_in_check = {
+            Player.WHITE: False,
+            Player.BLACK: False
+        }
+
+        self.before_simulation_state = None
+        self.simulated_moves = []
+        self.checkmate = None
 
         self.setup()
 
@@ -110,14 +123,135 @@ class Board:
             self.white_pieces.remove(piece)
         else:
             self.black_pieces.remove(piece)
+
+    def global_moves_update(self, start, end, piece: p.Piece, simulated=False):
+        """
+        Update the global board state after a move.
+        """
+
+        # check if castling was played
+        if piece.name == "K" and self.available_castling[piece.color]["king"]:
+            if end == "G1" or end == "G8":
+                if not simulated:
+                    self.move("H" + end[1], "F" + end[1])
+                else:
+                    self.simulate_move("H" + end[1], "F" + end[1])
+
+        elif piece.name == "K" and self.available_castling[piece.color]["queen"]:
+            if end == "C1" or end == "C8":
+                if not simulated:
+                    self.move("A" + end[1], "D" + end[1])
+                else:
+                    self.simulate_move("A" + end[1], "D" + end[1])
+
+        # check if previous en passant was played
+        if self.en_passant is not None:
+            en_passant = self.get(self.en_passant, _exception=False)
+            if en_passant is not None and en_passant.name == "P":
+                killed_pawn = self.en_passant[0], self.en_passant[1] + (1 if piece.color == Player.WHITE else -1)
+                killed_pawn = self.get(killed_pawn, _exception=False)
+                if killed_pawn is not None and killed_pawn.name == "P" and killed_pawn.color != piece.color:
+                    self.remove_piece(killed_pawn)
+
+        # update en passant
+        x_start, y_start = self.get_coords(start)
+        x_end, y_end = self.get_coords(end)
+        
+        if piece.name == "P" and abs(y_end - y_start) == 2:
+            self.en_passant = (x_start, (y_start + y_end) // 2)
+        else:
+            self.en_passant = None
+
+        # update castling rights
+        if piece.name == "K":
+            self.available_castling[piece.color]["king"] = False
+            self.available_castling[piece.color]["queen"] = False
+        elif piece.name == "R":
+            if piece.color == Player.WHITE:
+                if start.upper() == "A1":
+                    self.available_castling[Player.WHITE]["queen"] = False
+                elif start.upper() == "H1":
+                    self.available_castling[Player.WHITE]["king"] = False
+            else:
+                if start.upper() == "A8":
+                    self.available_castling[Player.BLACK]["queen"] = False
+                elif start.upper() == "H8":
+                    self.available_castling[Player.BLACK]["king"] = False
+
+    def promote(self, pos, piece_name):
+        """
+        Promote the pawn at the given position to the given piece.
+        """
+        piece = self.get(pos)
+        if piece is None or piece.name != "P":
+            raise ValueError(f"No pawn at position {pos}")
+        
+        if piece.color == Player.WHITE and pos[1] != "8":
+            raise ValueError(f"Cannot promote white pawn at position {pos}")
+        elif piece.color == Player.BLACK and pos[1] != "1":
+            raise ValueError(f"Cannot promote black pawn at position {pos}")
+
+        if piece_name not in ["Q", "R", "B", "N"]:
+            raise ValueError(f"Invalid piece name: {piece_name}")
+
+        x, y = self.get_coords(pos)
+        new_piece = None
+        if piece_name == "Q":
+            new_piece = p.Queen(piece.color, (x, y))
+        elif piece_name == "R":
+            new_piece = p.Rook(piece.color, (x, y))
+        elif piece_name == "B":
+            new_piece = p.Bishop(piece.color, (x, y))
+        elif piece_name == "N":
+            new_piece = p.Knight(piece.color, (x, y))
+
+        self.remove_piece(piece)
+        self.board[pos[0].lower()][int(pos[1]) - 1] = new_piece
+        if piece.color == Player.WHITE:
+            self.white_pieces.add(new_piece)
+        else:
+            self.black_pieces.add(new_piece)
+
+
+        self.check_state()
+
+    def check_state(self, simulated=False):
+        self.king_in_check[Player.WHITE] = self.check_nb_attackers(self.get_king(Player.WHITE).pos, Player.BLACK) > 0
+        self.king_in_check[Player.BLACK] = self.check_nb_attackers(self.get_king(Player.BLACK).pos, Player.WHITE) > 0
+
+        if simulated: return
+        # check for checkmate
+        has_a_move = False
+        if self.king_in_check[Player.WHITE]:
+            for piece in self.white_pieces:
+                if len(piece.get_possible_moves(self)) > 0 or \
+                    len(piece.get_possible_captures(self)) > 0:
+                    has_a_move = True
+                    break
+        elif self.king_in_check[Player.BLACK]:
+            for piece in self.black_pieces:
+                if len(piece.get_possible_moves(self)) > 0 or \
+                    len(piece.get_possible_captures(self)) > 0:
+                    has_a_move = True
+                    break
+        else:
+            has_a_move = True
+
+        if not has_a_move and self.king_in_check[Player.WHITE]:
+            self.checkmate = Player.WHITE
+        elif not has_a_move and self.king_in_check[Player.BLACK]:
+            self.checkmate = Player.BLACK
+        else:
+            self.checkmate = None
     
     def move(self, start, end):
         """
         Move the piece from start to end.
         """
         end_coords = self.get_coords(end)
-
         piece = self.get(start, _exception=False)
+        self.global_moves_update(start, end, piece)
+
         if piece is None:
             raise ValueError(f"No piece at position {start}")
         
@@ -132,6 +266,96 @@ class Board:
         self.board[end[0].lower()][int(end[1]) - 1] = piece
 
         piece.pos = end_coords
+        self.check_state()
+        
+    def simulate_move(self, start, end):
+        """
+        Simulate the move from start to end.
+        """
+        if type(start) is tuple:
+            start = self.get_box(start)
+        if type(end) is tuple:
+            end = self.get_box(end)
+
+        if self.before_simulation_state is None:
+            self.before_simulation_state = self.available_castling.copy()
+
+        piece = self.get(start, _exception=False)
+
+        self.global_moves_update(start, end, piece, simulated=True)
+            
+        if piece is None:
+            raise ValueError(f"No piece at position {start}")
+        
+        piece_end = self.get(end, _exception=False)
+        current_move = {
+            "from": start,
+            "to": end,
+            "piece_start": piece,
+            "piece_end": piece_end
+        }
+        self.simulated_moves.append(current_move)
+
+        self.board[start[0].lower()][int(start[1]) - 1] = None
+        self.board[end[0].lower()][int(end[1]) - 1] = piece
+
+        piece.pos = self.get_coords(end)
+        if piece_end is not None: piece_end.pos = None
+        self.check_state(simulated=True)
+
+
+    def undo_simulated_move(self):
+        """
+        Undo the last simulated move.
+        """
+        if len(self.simulated_moves) == 0:
+            return
+        
+        if self.before_simulation_state is not None: # can be wrong
+            self.available_castling = self.before_simulation_state
+            self.before_simulation_state = None
+            
+        
+        last_move = self.simulated_moves.pop()
+        start = last_move["from"]
+        end = last_move["to"]
+        piece_start = last_move["piece_start"]
+        piece_end = last_move["piece_end"]
+
+        self.board[start[0].lower()][int(start[1]) - 1] = piece_start
+        self.board[end[0].lower()][int(end[1]) - 1] = piece_end
+
+        piece_start.pos = self.get_coords(start)
+        if piece_end is not None:
+            piece_end.pos = self.get_coords(end)
+
+        self.global_moves_update(end, start, piece_start, simulated=True)
+        self.check_state(simulated=True)
+
+    def get_king(self, color):
+        """
+        Get the king of the given color.
+        """
+        for piece in self.white_pieces if color == Player.WHITE else self.black_pieces:
+            if isinstance(piece, p.King):
+                return piece
+        raise Exception(f"No king found for color {color} ... LOL")
+
+    def check_nb_attackers(self, pos, color):
+        """
+        Check the number of attackers for the given position on a given box.
+        """
+        attackers = 0
+        if color == Player.WHITE:
+            for piece in self.white_pieces:
+                if pos in piece.get_possible_captures(self, check_attackers=True) or pos in piece.get_possible_moves(self, check_attackers=True):
+                    attackers += 1
+        else:
+            for piece in self.black_pieces:
+                if pos in piece.get_possible_captures(self, check_attackers=True) or pos in piece.get_possible_moves(self, check_attackers=True):
+                    attackers += 1
+
+        return attackers                    
 
     def to_FEN(self):
         """

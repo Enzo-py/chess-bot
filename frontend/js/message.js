@@ -42,5 +42,7 @@ function read_game_started(data) {
 
 function read_confirm_move(data) {
     // data
+    game_state.king_in_check = data.king_in_check;
+    game_state.checkmate = data.checkmate;
     update_game_state(data.FEN);
 }

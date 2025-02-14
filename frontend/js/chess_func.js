@@ -3,7 +3,9 @@ const game_state = {
     en_passant: "-",
     halfmove_clock: 0,
     fullmove_number: 0,
-    castling: {'K': true, 'Q': true, 'k': true, 'q': true}
+    castling: {'K': true, 'Q': true, 'k': true, 'q': true},
+    king_in_check: false,
+    checkmate: null
 }
 
 var saved_possible_moves = {
@@ -37,7 +39,7 @@ async function draw_game(board_fen) {
     // we want to keep the aspect ratio of the board
 
     board_size = board.node().getBoundingClientRect().width;
-    square_size = parseInt((board_size - 30) / 8);
+    square_size = parseInt((board_size - 30) / 8) - 8;
     board.attr("square-size", square_size);
 
     const columns = "ABCDEFGH";
@@ -58,14 +60,17 @@ async function draw_game(board_fen) {
         for (let j = 0; j < 8; j++) {
             const boxId = `${columns[j]}${rows[i]}`;
             board_boxes.append("rect")
-                .attr("x", j * square_size)
-                .attr("y", i * square_size)
+                .attr("x", j * (square_size + 4) + 4)
+                .attr("y", i * (square_size + 4) + 4)
                 .attr("width", square_size)
                 .attr("height", square_size)
                 .attr("fill", (i + j) % 2 == 0 ? "var(--white-box)" : "var(--black-box)")
                 .attr("id", boxId)
                 .attr("i-index", i)
-                .attr("j-index", j);
+                .attr("j-index", j)
+                .attr("stroke", (i + j) % 2 == 0 ? "var(--white-box)" : "var(--black-box)")
+                .attr("stroke-width", 4)
+                .attr("color", (i + j) % 2 == 0 ? "white" : "black");
         }
     }
 
@@ -73,8 +78,8 @@ async function draw_game(board_fen) {
     for (let i = 0; i < 8; i++) {
         // Column letters (bottom)
         board_labels.append("text")
-            .attr("x", i * square_size + square_size / 2)
-            .attr("y", 8 * square_size + 15)
+            .attr("x", i * (square_size + 4) + square_size / 2 + 2)
+            .attr("y", 8 * (square_size + 4) + 15 + 4)
             .attr("text-anchor", "middle")
             .attr("font-size", "12px")
             .text(columns[i]);
@@ -82,7 +87,7 @@ async function draw_game(board_fen) {
         // Row numbers (left side)
         board_labels.append("text")
             .attr("x", -10)
-            .attr("y", i * square_size + square_size / 2)
+            .attr("y", i * (square_size + 4) + square_size / 2 + 2)
             .attr("text-anchor", "end")
             .attr("alignment-baseline", "middle")
             .attr("font-size", "12px")
@@ -175,7 +180,7 @@ const dragHandler = d3.drag()
                 pos: piece.attr("pos")
             });
 
-            wait_for_message("possible-moves", timeout=5, only_content=true).then((data) => {
+            wait_for_message("possible-moves", timeout=8, only_content=true).then((data) => {
                 if (data === null) {
                     piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
                     return; // Timeout: error will be return by the server
@@ -221,7 +226,7 @@ const dragHandler = d3.drag()
             pos: d3.select(this).attr("pos")
         });
 
-        wait_for_message("possible-moves", timeout=5, only_content=true).then((data) => {
+        wait_for_message("possible-moves", timeout=8, only_content=true).then((data) => {
             if (data === null) {
                 d3.select(this).attr("transform", `${d3.select(this).attr("initial-pos")} scale(${d3.select(this).attr("initial-scale")})`);
                 return; // Timeout: error will be return by the server
@@ -254,10 +259,27 @@ async function move_piece(moves, event, piece) {
     if (moves === null || !moves.includes(nearest_square.attr("id"))) {
         piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
         toast("warning", "Invalid move: piece cannot move to that square.");
+        if (game_state.king_in_check) {
+            new Audio("../media/illegal.mp3").play();
+            
+            // get king position
+            if (game_state.turn == "w") {
+                king = d3.select(`g#board-pieces g[fen="K"]`);
+            }
+            else {
+                king = d3.select(`g#board-pieces g[fen="k"]`);
+            }
+            // highlight king square for 2s
+            king_id = king.attr("pos");
+            king_square = d3.select(`rect#${king_id}`);
+            king_square.classed("highlight", true);
+            setTimeout(() => {
+                king_square.classed("highlight", false);
+            }, 2000);
+        }
         return;
     }
 
-    
     piece_on_square = d3.select(`g#board-pieces g[pos="${nearest_square.attr("id")}"]`);
     let killed_pawn = null;
     if (nearest_square.attr("id").toLowerCase() == game_state.en_passant) {
@@ -268,10 +290,17 @@ async function move_piece(moves, event, piece) {
         }
     }
 
+    // check if promotion
+    let promote_piece_id = null;
+    if (piece.attr("fen").toLowerCase() == "p" && (nearest_square.attr("id")[1] == "1" || nearest_square.attr("id")[1] == "8")) {
+        promote_piece_id = await promote_popup(piece.attr("fen").charCodeAt(0) < 91 ? "w" : "b");
+    }
+
     send_message("move-piece", {
         piece: piece.attr("fen"),
         start: piece.attr("pos"),
-        end: nearest_square.attr("id")
+        end: nearest_square.attr("id"),
+        promote_to: promote_piece_id
     });
 
     confirmation = await wait_for_message("confirm-move", timeout=5, only_content=true)
@@ -282,6 +311,14 @@ async function move_piece(moves, event, piece) {
 
     saved_possible_moves = {} // reset
     snap_to_square(piece, event.x, event.y);
+
+    if (promote_piece_id !== null) {
+        // remove pawn
+        piece.remove();
+        draw_piece(promote_piece_id, nearest_square.attr("id"));
+    }
+
+    pos_x_idx = piece.attr("pos")[0].charCodeAt(0) - 'A'.charCodeAt(0)
     if (!piece_on_square.empty()) {
         // if piece of the same color, return to initial position: check if the both fen are uppercase or lowercase 
         is_upper = piece.attr("fen").charCodeAt(0) < 91;
@@ -294,15 +331,41 @@ async function move_piece(moves, event, piece) {
 
         // if piece of different color, remove it
         piece_on_square.remove();
-        new Audio("../media/capture.mp3").play()
+        
+        if (confirmation.king_in_check)
+            new Audio("../media/move-check.mp3").play();
+        else
+            new Audio("../media/capture.mp3").play()
 
     } else {
         if (killed_pawn !== null && !killed_pawn.empty()) {
             // remove killed pawn
             killed_pawn.remove();
-            new Audio("../media/capture.mp3").play()
-        } else
+            if (confirmation.king_in_check)
+                new Audio("../media/move-check.mp3").play();
+            else
+                new Audio("../media/capture.mp3").play()
+        } else if (piece.attr("fen").toLowerCase() == "k" && Math.abs(nearest_square.attr("j-index") - pos_x_idx) == 2) {
+            // castling
+            let rook_pos = nearest_square.attr("j-index") > pos_x_idx ? "H" : "A";
+            let rook = d3.select(`g#board-pieces g[pos="${rook_pos}${piece.attr("pos")[1]}"]`);
+            let rook_dest = nearest_square.attr("j-index") > pos_x_idx ? pos_x_idx + 1 : pos_x_idx - 1;
+            rook_dest = String.fromCharCode('A'.charCodeAt(0) + rook_dest) + piece.attr("pos")[1];
+            rook.attr("transform", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")}) scale(${rook.attr("initial-scale")})`);
+            rook.attr("pos", rook_dest);
+            rook.attr("initial-pos", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")})`);
+            new Audio("../media/castle.mp3").play();
+        }
+        else if (confirmation.king_in_check)
+            new Audio("../media/move-check.mp3").play();
+        else
             new Audio("../media/move.mp3").play()
+
+        if (confirmation.checkmate != null) {
+            new Audio("../media/game-end.webm").play();
+            game_state.checkmate = confirmation.checkmate;
+            end_game()
+        }
     }
 
     piece = piece;
@@ -313,19 +376,64 @@ async function move_piece(moves, event, piece) {
 
 function get_nearest_square(x, y, return_coords = false) {
     const squareSize = parseInt(d3.select("svg#board").attr("square-size"));
-    const col = Math.round((x - squareSize / 2) / squareSize);
-    const row = Math.round((y - squareSize / 2) / squareSize);
+    const col = Math.min(Math.round((x - squareSize / 2) / squareSize), 7)
+    const row = Math.min(Math.round((y - squareSize / 2) / squareSize), 7);
 
-    const snappedX = col * squareSize;
-    const snappedY = row * squareSize;
+    const snappedX = col * squareSize + 4 * col + 4 + 0.5
+    const snappedY = row * squareSize + 4 * row + 4 - 0.5
 
+    nearest_square = d3.select(`rect[i-index="${row}"][j-index="${col}"]`);
+    if (nearest_square.empty()) {
+        throw `Invalid square: ${col}, ${row}`;
+    }
     if (return_coords) 
         return [snappedX, snappedY];
-    return d3.select(`rect[i-index="${snappedY / squareSize}"][j-index="${snappedX / squareSize}"]`);
+    return nearest_square;
 }
 
 // Function to snap piece to nearest square
 function snap_to_square(piece, x, y) {
     const [snappedX, snappedY] = get_nearest_square(x, y, true);
+    square_size = parseInt(d3.select("svg#board").attr("square-size"));
     piece.attr("transform", `translate(${snappedX}, ${snappedY}) scale(${piece.attr("initial-scale")})`);
+}
+
+function end_game() {
+    loosing_king = d3.select(`g#board-pieces g[fen="${game_state.checkmate == "w" ? "K" : "k"}"]`);
+    winning_king = d3.select(`g#board-pieces g[fen="${game_state.checkmate == "w" ? "k" : "K"}"]`);
+    loosing_king_square = d3.select(`rect#${loosing_king.attr("pos")}`);
+    winning_king_square = d3.select(`rect#${winning_king.attr("pos")}`);
+
+    loosing_king_square.attr("stroke", "red").attr("stroke-width", 4);
+    winning_king_square.attr("stroke", "green").attr("stroke-width", 4);
+}
+
+function promote_popup(color) {
+    ctn = `
+        <h1>Promotion</h1>
+        <p>Choose a piece to promote your pawn:</p>
+        <div class="promotion-pieces">
+            
+        </div>
+    `
+    pop_up = pop_up_showcase(ctn)
+    pices = color == "w" ? ["Q", "R", "N", "B"] : ["q", "r", "n", "b"];
+    pices.forEach((piece) => {
+        // create new svg not a clone with d3
+        svg = d3.select(pop_up).select(".promotion-pieces").append("svg").classed("promotion-piece", true).attr("id", piece).attr("width", 75 + 8).attr("height", 75 + 8);
+        piece = d3.select(`#pieces-defs g[fen="${piece}"]`).clone(true).node();
+        scale_factor = parseFloat(piece.getBoundingClientRect().width) / 75;
+        d3.select(piece).attr("transform", `translate(4, 4) scale(${1/scale_factor})`).style("cursor", "pointer");
+        svg.node().appendChild(piece);
+    })
+
+    return new Promise((resolve, reject) => {
+        document.querySelectorAll(".promotion-piece").forEach((piece) => {
+            piece.addEventListener("click", () => {
+                // return piece id
+                resolve(piece.id)
+                pop_up.remove()
+            })
+        })
+    })
 }

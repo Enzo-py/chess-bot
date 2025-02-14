@@ -46,9 +46,18 @@ class Piece:
     def move(self, new_pos):
         self.pos = new_pos
 
-    def get_possible_moves(self, board) -> list[tuple[int, int]]:
+    def get_possible_moves(self, board, check_attackers=False) -> list[tuple[int, int]]:
         possible_moves = []
+        if self.pos is None: return possible_moves
         y_direction = 1 if self.color == 'w' else -1
+
+        # check for pion attack in move, cuz pion is special
+        if check_attackers and self.name == 'P':
+            for pattern in self.capture_patterns:
+                x, y = pattern
+                new_pos = (self.pos[0] + x, self.pos[1] + y * y_direction)
+                if board.is_valid_position(new_pos): possible_moves.append(new_pos)
+            return possible_moves
 
         for pattern in self.movement_patterns:
             x, y = pattern
@@ -131,6 +140,7 @@ class Piece:
                 possible_moves.append(new_pos)
               
         for name, pattern in self.conditional_patterns.items():
+            if check_attackers: break
             if name == 'first_move' and (
                 (self.color == 'w' and self.pos[1] == 1) or
                 (self.color == 'b' and self.pos[1] == 6)
@@ -140,11 +150,65 @@ class Piece:
                 new_pos = (self.pos[0] + x, self.pos[1] + y * y_direction)
                 if self._check_move(new_pos, board):
                     possible_moves.append(new_pos)
-                
+            
+            elif name == 'kingside-castling':
+                if self.color == 'w' and board.available_castling[self.color]["king"]:
+                    all_free_positions = [(i, 0) for i in range(5, 7)]
+                    all_free_positions = [board.check_nb_attackers(pos, 'b') == 0 and board.get(pos) is None for pos in all_free_positions]
+
+                    # check rook is here
+                    if board.get((7, 0)) is None or board.get((7, 0)).name != 'R': continue
+                    if all(all_free_positions): possible_moves.append((6, 0))
+
+                elif self.color == 'b' and board.available_castling[self.color]["king"]:
+                    all_free_positions = [(i, 7) for i in range(5, 7)]
+                    all_free_positions = [board.check_nb_attackers(pos, 'w') == 0 and board.get(pos) is None for pos in all_free_positions]
+
+                    # check rook is here
+                    if board.get((7, 7)) is None or board.get((7, 7)).name != 'R': continue
+                    if all(all_free_positions): possible_moves.append((6, 7))
+
+            elif name == 'queenside-castling':
+                if self.color == 'w' and board.available_castling[self.color]["queen"]:
+                    all_free_positions = [(i, 0) for i in range(1, 4)]
+                    all_free_positions = [board.check_nb_attackers(pos, 'b') == 0 and board.get(pos) is None for pos in all_free_positions]
+
+                    # check rook is here
+                    if board.get((0, 0)) is None or board.get((0, 0)).name != 'R': continue
+                    if all(all_free_positions): possible_moves.append((2, 0))
+
+                elif self.color == 'b' and board.available_castling[self.color]["queen"]:
+                    all_free_positions = [(i, 7) for i in range(1, 4)]
+                    all_free_positions = [board.check_nb_attackers(pos, 'w') == 0 and board.get(pos) is None for pos in all_free_positions]
+
+                    # check rook is here
+                    if board.get((0, 7)) is None or board.get((0, 7)).name != 'R': continue
+                    if all(all_free_positions): possible_moves.append((2, 7))
+
+        if not check_attackers and self.name == 'K':
+            for move in possible_moves.copy():
+                if board.check_nb_attackers(move, 'b' if self.color == 'w' else 'w') > 0:
+                    possible_moves.remove(move)
+        
+        # check if the king is not in check after the move
+        if not check_attackers and self.name != 'K':
+            for move in possible_moves.copy():
+                board.simulate_move(start=self.pos, end=move)
+                if board.check_nb_attackers(board.get_king(self.color).pos, 'b' if self.color == 'w' else 'w') > 0:
+                    possible_moves.remove(move)
+                board.undo_simulated_move()
+
+        if not check_attackers and board.king_in_check[self.color]:
+            for move in possible_moves.copy():
+                board.simulate_move(start=self.pos, end=move)
+                if board.king_in_check[self.color]:
+                    possible_moves.remove(move)
+                board.undo_simulated_move()
         return possible_moves
     
-    def get_possible_captures(self, board) -> list[tuple[int, int]]:
+    def get_possible_captures(self, board, check_attackers=False) -> list[tuple[int, int]]:
         possible_captures = []
+        if self.pos is None: return possible_captures
         y_direction = 1 if self.color == 'w' else -1
 
         for pattern in self.capture_patterns:
@@ -266,6 +330,26 @@ class Piece:
                 if board.is_valid_position(new_pos) and board.get(new_pos) is None:
                     possible_captures.append(new_pos)
 
+        # check if the king is not in check after the move
+        if not check_attackers and self.name == 'K':
+            for move in possible_captures.copy():
+                if board.check_nb_attackers(move, 'b' if self.color == 'w' else 'w') > 0:
+                    possible_captures.remove(move)
+        
+        # check if the king is not in check after the move
+        if not check_attackers and self.name != 'K':
+            for move in possible_captures.copy():
+                board.simulate_move(start=self.pos, end=move)
+                if board.check_nb_attackers(board.get_king(self.color).pos, 'b' if self.color == 'w' else 'w') > 0:
+                    possible_captures.remove(move)
+                board.undo_simulated_move()
+
+        if not check_attackers and board.king_in_check[self.color]:
+            for move in possible_captures.copy():
+                board.simulate_move(start=self.pos, end=move)
+                if board.king_in_check[self.color]:
+                    possible_captures.remove(move)
+                board.undo_simulated_move()
         return possible_captures
     
     def _check_move(self, new_pos, board) -> bool:
@@ -379,11 +463,6 @@ class Knight(Piece):
 
         self.capture_patterns.extend(self.movement_patterns)
 
-        self.conditional_patterns.update({
-            'kingside-castling': (2, 0),
-            'queenside-castling': (-2, 0)
-        })
-
 class Bishop(Piece):
     
     def __init__(self, color, pos):
@@ -439,3 +518,8 @@ class King(Piece):
         ])
 
         self.capture_patterns.extend(self.movement_patterns)
+
+        self.conditional_patterns.update({
+            'kingside-castling': (2, 0),
+            'queenside-castling': (-2, 0)
+        })
