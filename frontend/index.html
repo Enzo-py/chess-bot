@@ -24,9 +24,11 @@
     </header>
 
     <main>
+        <div class="black-player"></div>
         <div class="board-container">
-
+            <!-- chess board -->
         </div>
+        <div class="white-player"></div>
     </main>
 
     <script>
@@ -36,42 +38,125 @@
         function start_game() {
             ctn = `
                 <span class="title">Start a game</span>
+                <div class="create-player">
+                    <input type="text" id="player-name" placeholder="Player name">
+                    <button onclick="create_player()">Create player</button>
+                </div>
+
                 <div class="form">
                     <label for="game-mode">Game mode</label>
                     <select id="game-mode" onchange="game_mode_change()">
-                        <option value="PvP">Player vs Player</option>
-                        <option value="PvAI" selected >Player vs AI</option>
+                        <option value="PvP" selected>Player vs Player</option>
+                        <option value="PvAI" >Player vs AI</option>
                         <option value="AIvAI">AI vs AI</option>
                     </select>
                     
-                    <div class="ai-selection-block">
+                    <div class="ai-selection-block" style="display: none;">
                         <label for="ai-selection">AI selection</label>
                         <select id="ai-selection">
-                            <option value="1">... (coming soon)</option>
                         </select>
                     </div>
 
-                    <div class="ai-vs-ai-block">
+                    <div class="player-selection-block" style="display: none;">
+                        <label for="player-selection">Player selection</label>
+                        <select id="player-selection">
+                        </select>
+                    </div>
+
+                    <div class="pvp-selection-block">
+                        <label for="player-color">Player 1</label>
+                        <select id="player1-selection">
+                        </select>
+                        
+                        <label for="player-color">Player 2</label>
+                        <select id="player2-selection">
+                        </select>
+                    </div>
+
+
+                    <div class="ai-vs-ai-block" style="display: none;">
                         <label for="ai1-selection">AI 1 selection</label>
                         <select id="ai1-selection">
-                            <option value="1">... (coming soon)</option>
                         </select>
 
                         <label for="ai2-selection">AI 2 selection</label>
                         <select id="ai2-selection">
-                            <option value="1">... (coming soon)</option>
                         </select>
                     </div>
 
-                    <label for="player-color">Player color</label>
+                    <label for="player-color">Player 1 color</label>
                     <select id="player-color">
-                        <option value="1">White</option>
-                        <option value="2">Black</option>
+                        <option value="w">White</option>
+                        <option value="b">Black</option>
                     </select>
                 </form>
             `
 
-            pop_up_confirm(ctn, start_game_confirm);
+            pop_up = pop_up_confirm(ctn, start_game_confirm);
+            
+            send_message("get-players-list", {}, true, "Getting player list...");
+            wait_for_message("players-list", 1000).then((data) => {
+                console.log("Players list", data);
+                data = data.data.message
+                pop_up = d3.select(".pop-up");
+                pop_up.select("#ai-selection").selectAll("option")
+                    .data(data.ais)
+                    .enter()
+                    .append("option")
+                    .attr("value", d => d.model)
+                    .text(d => `${d.model} - ${d.elo} ELO`);
+
+                pop_up.select("#ai1-selection").selectAll("option")
+                    .data(data.ais)
+                    .enter()
+                    .append("option")
+                    .attr("value", d => d.model)
+                    .text(d => `${d.model} - ${d.elo} ELO`);
+
+                pop_up.select("#ai2-selection").selectAll("option")
+                    .data(data.ais)
+                    .enter()
+                    .append("option")
+                    .attr("value", d => d.model)
+                    .text(d => `${d.model} - ${d.elo} ELO`);
+
+                pop_up.select("#player1-selection").selectAll("option")
+                    .data(data.players)
+                    .enter()
+                    .append("option")
+                    .attr("value", d => d.name)
+                    .text(d => `${d.name} - ${d.elo} ELO`);
+
+                pop_up.select("#player2-selection").selectAll("option")
+                    .data(data.players)
+                    .enter()
+                    .append("option")
+                    .attr("value", d => d.name)
+                    .text(d => `${d.name} - ${d.elo} ELO`);
+
+                pop_up.select("#player-selection").selectAll("option")
+                    .data(data.players)
+                    .enter()
+                    .append("option")
+                    .attr("value", d => d.name)
+                    .text(d => `${d.name} - ${d.elo} ELO`);
+            }).catch((error) => {
+                console.error(error);
+            });
+        }
+
+        function create_player() {
+            player_name = d3.select("#player-name").node().value;
+            send_message("create-player", {name: player_name}, true, "Creating player...");
+            wait_for_message("player-created", 1000, true).then((data) => {
+                toast("success", data);
+            });
+
+            // remove pop-up 
+            d3.select("#pop-up-wrapper").remove();
+
+            // start game
+            start_game();
         }
 
         function start_game_confirm() {
@@ -80,13 +165,22 @@
             
             if (game_mode == "PvAI") {
                 ai_selection = d3.select("#ai-selection").node().value;
-                send_message("start-game", {game_mode: game_mode, player_color: player_color, ai_selection: ai_selection}, true, "Starting game...");
+                player = d3.select("#player-selection").node().value;
+                game_state.white_player = player_color == 'w' ? player : ai_selection
+                game_state.black_player = player_color == 'b' ? player : ai_selection
+                send_message("start-game", {game_mode: game_mode, player_color: player_color, ai_selection: ai_selection, player: player}, true, "Starting game...");
             } else if (game_mode == "AIvAI") {
                 ai1_selection = d3.select("#ai1-selection").node().value;
                 ai2_selection = d3.select("#ai2-selection").node().value;
+                game_state.white_player = player_color == "w" ? ai1_selection : ai2_selection
+                game_state.black_player = player_color == "b" ? ai1_selection : ai2_selection
                 send_message("start-game", {game_mode: game_mode, player_color: player_color, ai1_selection: ai1_selection, ai2_selection: ai2_selection}, true, "Starting game...");
             } else {
-                send_message("start-game", {game_mode: game_mode, player_color: player_color}, true, "Starting game...");
+                player1 = d3.select("#player1-selection").node().value;
+                player2 = d3.select("#player2-selection").node().value;
+                game_state.white_player = player_color == "w" ? player1 : player2
+                game_state.black_player = player_color == "b" ? player1 : player2
+                send_message("start-game", {game_mode: game_mode, player_color: player_color, player1: player1, player2: player2}, true, "Starting game...");
             }
         }
 
@@ -94,8 +188,10 @@
             game_mode = d3.select("#game-mode").node().value;
             if (game_mode == "PvAI") {
                 d3.select(".ai-selection-block").style("display", "flex");
+                d3.select(".player-selection-block").style("display", "flex");
             } else {
                 d3.select(".ai-selection-block").style("display", "none");
+                d3.select(".player-selection-block").style("display", "none");
             }
 
             if (game_mode == "AIvAI") {
@@ -103,12 +199,17 @@
             } else {
                 d3.select(".ai-vs-ai-block").style("display", "none");
             }
+
+            if (game_mode == "PvP") {
+                d3.select(".pvp-selection-block").style("display", "flex");
+            } else {
+                d3.select(".pvp-selection-block").style("display", "none");
+            }
         }
     
         function send_message(type, data, waiting_screen = false, msg = '') {
             // console.log("Sending message to server", type, waiting_screen);
             if (waiting_screen) {
-                console.log("Waiting for response");
                 d3.select("#loading-screen").style("display", "flex");
                 d3.select("#loading-screen p").text(msg);
                 waiting_for_response = true;
@@ -117,25 +218,35 @@
         }
 
         async function wait_for_message(type, timeout = 10000, only_content = false) {
-            let start = Date.now();
-            while (socket_data.last_message == null || socket_data.last_message.type != type) {
-                if (Date.now() - start > timeout) {
-                    return null;
+            return new Promise((resolve, reject) => {
+                let timeout_id = setTimeout(() => {
+                    socket.removeEventListener("message", check_message)
+                    reject("Timeout");
+                }, timeout);
+
+                function check_message(event) {
+                    try {
+                        message = JSON.parse(event.data);
+                    } catch (e) {
+                        console.error("Invalid JSON received:", event.data);
+                        return; // Ignore invalid messages
+                    }
+                    if (message && message.type == type) {
+                        clearTimeout(timeout_id);
+                        socket.removeEventListener("message", check_message);
+
+                        if (only_content && message.data && message.data.message) {
+                            resolve(message.data.message);
+                        } else if (only_content && messsage.data) {
+                            resolve(message.data);
+                        } else {
+                            resolve(message);
+                        }
+                    }
                 }
-                await new Promise(r => setTimeout(r, 100));
-            }
-            last_message = socket_data.last_message;
-            socket_data.last_message = null;
-            if (last_message.type == type) {
-                if (only_content && last_message.data && last_message.data.message)
-                    return last_message.data.message
-                else if (only_content && last_message.data)
-                    return last_message.data
-                else
-                    return last_message;
-            } else {
-                return null;
-            }
+
+                socket.addEventListener("message", check_message);
+            })
         }
 
         socket.onerror = (error) => {

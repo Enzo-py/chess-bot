@@ -18,6 +18,10 @@ function read_message(event) {
             game_state.turn = game_state.turn === "w" ? "b" : "w";
             read_confirm_move(content.data.message);
             break;
+        case "ai-move":
+            game_state.turn = game_state.turn === "w" ? "b" : "w";
+            read_ai_move(content.data.message);
+            break;
         default:
             return content
     }
@@ -45,4 +49,14 @@ function read_confirm_move(data) {
     game_state.king_in_check = data.king_in_check;
     game_state.checkmate = data.checkmate;
     update_game_state(data.FEN);
+}
+
+function read_ai_move(data) {
+    // data
+    game_state.king_in_check = data.king_in_check;
+    game_state.checkmate = data.checkmate;
+    update_game_state(data.FEN);
+    piece = d3.select(`svg#board #board-pieces [pos="${data.from}"]`);
+    let rect = d3.select(`svg#board #board-boxes #${data.to}`);
+    move_piece(null, rect, piece, true);
 }

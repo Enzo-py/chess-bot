@@ -17,6 +17,8 @@ class Game:
         self.white = None
         self.black = None
 
+        self.ia_move_handler = None
+
     def to_FEN(self):
         left_part = self.board.to_FEN()
         right_part = f"{'w' if self.current_player == Player.WHITE else 'b'}"
@@ -79,6 +81,30 @@ class Game:
 
         self.board.move(start, end)
 
+    def play_algo_move(self):
+        """
+        Get the move from the AI.
+        """
+        if self.board.checkmate: return
+        if self.current_player == Player.WHITE and issubclass(type(self.white), Player):
+            action = self.white.play(list(self.board.white_pieces))
+        elif self.current_player == Player.BLACK and issubclass(type(self.black), Player):
+            action = self.black.play(list(self.board.black_pieces))
+        else: return
+        
+        if action is None: # surrender
+            self.board.checkmate = self.current_player
+
+        
+        self.move(action["from"], action["to"])
+
+        if "promotion" in action:
+            self.board.promote(action["to"], action["promotion"])
+
+        if self.ia_move_handler is not None: self.ia_move_handler(action)
+        return action
+            
+
     def _update_state(self, piece, start_coords, start, end):
         """
         Update the global game state after a move.
@@ -94,10 +120,20 @@ class Game:
         else:
             self.nb_half_moves += 1
 
-
     def play(self, white, black):
+        """
+        Play a game between two players.
+        """
+
         self.white = white
         self.black = black
+
+        if issubclass(type(white), Player):
+            white.color = Player.WHITE
+            white.game = self
+        if issubclass(type(black), Player):
+            black.color = Player.BLACK
+            black.game = self
 
 
 if __name__ == "__main__":

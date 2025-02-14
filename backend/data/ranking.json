@@ -1,0 +1,14 @@
+[
+    {
+        "name": "Enzo",
+        "type": "player",
+        "elo": 600,
+        "games": []
+    },
+    {
+        "model": "Random AI",
+        "type": "AI",
+        "elo": 600,
+        "games": []
+    }
+]

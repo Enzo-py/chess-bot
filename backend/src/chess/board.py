@@ -102,6 +102,8 @@ class Board:
         return: tuple
             (x, y)
         """
+        if type(pos) is tuple:
+            return pos
         letter, number = pos
         letter, number = letter.lower(), int(number)
         return ord(letter) - 97, int(number) - 1
@@ -221,29 +223,35 @@ class Board:
 
         if simulated: return
         # check for checkmate
-        has_a_move = False
+        white_has_move = False
+        black_has_move = False
+        
         if self.king_in_check[Player.WHITE]:
             for piece in self.white_pieces:
-                if len(piece.get_possible_moves(self)) > 0 or \
-                    len(piece.get_possible_captures(self)) > 0:
-                    has_a_move = True
-                    break
-        elif self.king_in_check[Player.BLACK]:
-            for piece in self.black_pieces:
-                if len(piece.get_possible_moves(self)) > 0 or \
-                    len(piece.get_possible_captures(self)) > 0:
-                    has_a_move = True
+                if len(piece.get_possible_moves(self)) > 0 or len(piece.get_possible_captures(self)) > 0:
+                    white_has_move = True
                     break
         else:
-            has_a_move = True
+            white_has_move = True
 
-        if not has_a_move and self.king_in_check[Player.WHITE]:
+        if self.king_in_check[Player.BLACK]:
+            for piece in self.black_pieces:
+                if len(piece.get_possible_moves(self)) > 0 or len(piece.get_possible_captures(self)) > 0:
+                    black_has_move = True
+                    break
+        else:
+            black_has_move = True
+
+        if not white_has_move:
             self.checkmate = Player.WHITE
-        elif not has_a_move and self.king_in_check[Player.BLACK]:
+        else: 
+            self.checkmate = None
+
+        if not black_has_move:
             self.checkmate = Player.BLACK
         else:
             self.checkmate = None
-    
+
     def move(self, start, end):
         """
         Move the piece from start to end.

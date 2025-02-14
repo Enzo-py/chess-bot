@@ -5,7 +5,9 @@ const game_state = {
     fullmove_number: 0,
     castling: {'K': true, 'Q': true, 'k': true, 'q': true},
     king_in_check: false,
-    checkmate: null
+    checkmate: null,
+    white_player: null,
+    black_player: null
 }
 
 var saved_possible_moves = {
@@ -25,6 +27,8 @@ function update_game_state(full_fen) {
         'k': castling_b.includes("k"),
         'q': castling_b.includes("q")
     }
+
+    console.log(game_state)
 }
 
 async function draw_game(board_fen) {
@@ -34,6 +38,9 @@ async function draw_game(board_fen) {
         board = d3.select("svg#board");
     }
     board.selectAll("*").remove();
+
+    d3.select(".white-player").text(game_state.white_player);
+    d3.select(".black-player").text(game_state.black_player);
 
     // we want dynamic board size: the size of the board depends on the size of the window (css)
     // we want to keep the aspect ratio of the board
@@ -180,7 +187,7 @@ const dragHandler = d3.drag()
                 pos: piece.attr("pos")
             });
 
-            wait_for_message("possible-moves", timeout=8, only_content=true).then((data) => {
+            wait_for_message("possible-moves", timeout=1000, only_content=true).then((data) => {
                 if (data === null) {
                     piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
                     return; // Timeout: error will be return by the server
@@ -226,14 +233,17 @@ const dragHandler = d3.drag()
             pos: d3.select(this).attr("pos")
         });
 
-        wait_for_message("possible-moves", timeout=8, only_content=true).then((data) => {
+        wait_for_message("possible-moves", timeout=1000, only_content=true).then((data) => {
+            console.log(data)
             if (data === null) {
                 d3.select(this).attr("transform", `${d3.select(this).attr("initial-pos")} scale(${d3.select(this).attr("initial-scale")})`);
                 return; // Timeout: error will be return by the server
             }
             saved_possible_moves[piece_id] = data.moves;
             move_piece(data.moves, event, d3.select(this));
-        });
+        }).catch((error) => {
+            console.error(error)
+        })
     });
 
 function draw_possible_moves(piece) {
@@ -253,40 +263,47 @@ function draw_possible_moves(piece) {
     })
 }
 
-async function move_piece(moves, event, piece) {
-    let nearest_square = get_nearest_square(event.x, event.y)
+async function move_piece(moves, event, piece, no_confirmation = false) {
 
-    if (moves === null || !moves.includes(nearest_square.attr("id"))) {
-        piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
-        toast("warning", "Invalid move: piece cannot move to that square.");
-        if (game_state.king_in_check) {
-            new Audio("../media/illegal.mp3").play();
-            
-            // get king position
-            if (game_state.turn == "w") {
-                king = d3.select(`g#board-pieces g[fen="K"]`);
+    if (no_confirmation) {
+        nearest_square = event
+    } else {
+        let nearest_square = get_nearest_square(event.x, event.y)
+
+        if (moves === null || !moves.includes(nearest_square.attr("id"))) {
+            piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
+            toast("warning", "Invalid move: piece cannot move to that square.");
+            if (game_state.king_in_check) {
+                new Audio("../media/illegal.mp3").play();
+                
+                // get king position
+                if (game_state.turn == "w") {
+                    king = d3.select(`g#board-pieces g[fen="K"]`);
+                }
+                else {
+                    king = d3.select(`g#board-pieces g[fen="k"]`);
+                }
+                // highlight king square for 2s
+                king_id = king.attr("pos");
+                king_square = d3.select(`rect#${king_id}`);
+                king_square.classed("highlight", true);
+                setTimeout(() => {
+                    king_square.classed("highlight", false);
+                }, 2000);
             }
-            else {
-                king = d3.select(`g#board-pieces g[fen="k"]`);
-            }
-            // highlight king square for 2s
-            king_id = king.attr("pos");
-            king_square = d3.select(`rect#${king_id}`);
-            king_square.classed("highlight", true);
-            setTimeout(() => {
-                king_square.classed("highlight", false);
-            }, 2000);
+            return;
         }
-        return;
     }
 
     piece_on_square = d3.select(`g#board-pieces g[pos="${nearest_square.attr("id")}"]`);
     let killed_pawn = null;
     if (nearest_square.attr("id").toLowerCase() == game_state.en_passant) {
-        if (piece.attr("fen").toLowerCase() == "p") {
+        if (piece.attr("fen").toLowerCase() == "p" && piece.attr("pos") != nearest_square.attr("id")) {
             direction = piece.attr("fen").charCodeAt(0) < 91 ? 1 : -1;
             pos = nearest_square.attr("id")[0] + (parseInt(nearest_square.attr("id")[1]) - direction);
             killed_pawn = d3.select(`g#board-pieces g[pos="${pos}"]`);
+            if (killed_pawn.node() === piece.node())
+                killed_pawn = null;
         }
     }
 
@@ -296,21 +313,32 @@ async function move_piece(moves, event, piece) {
         promote_piece_id = await promote_popup(piece.attr("fen").charCodeAt(0) < 91 ? "w" : "b");
     }
 
-    send_message("move-piece", {
-        piece: piece.attr("fen"),
-        start: piece.attr("pos"),
-        end: nearest_square.attr("id"),
-        promote_to: promote_piece_id
-    });
+    if (!no_confirmation) {
+        send_message("move-piece", {
+            piece: piece.attr("fen"),
+            start: piece.attr("pos"),
+            end: nearest_square.attr("id"),
+            promote: promote_piece_id
+        });
+    
+        confirmation = await wait_for_message("confirm-move", timeout=1000, only_content=true)
+        if (confirmation === null) {
+            piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
+            toast("warning", "Move not confirmed: timeout.");
+            return;
+        }
 
-    confirmation = await wait_for_message("confirm-move", timeout=5, only_content=true)
-    if (confirmation === null) {
-        piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
-        return;
+        game_state.king_in_check = confirmation.king_in_check;
+        game_state.checkmate = confirmation.checkmate;
     }
 
     saved_possible_moves = {} // reset
-    snap_to_square(piece, event.x, event.y);
+
+    if (no_confirmation) {
+        coords = get_square_absolute_position(nearest_square);
+        snap_to_square(piece, coords[0], coords[1]);
+    } else
+        snap_to_square(piece, event.x, event.y);
 
     if (promote_piece_id !== null) {
         // remove pawn
@@ -319,7 +347,8 @@ async function move_piece(moves, event, piece) {
     }
 
     pos_x_idx = piece.attr("pos")[0].charCodeAt(0) - 'A'.charCodeAt(0)
-    if (!piece_on_square.empty()) {
+    console.log(piece_on_square)
+    if (!piece_on_square.empty() && piece_on_square !== piece) {
         // if piece of the same color, return to initial position: check if the both fen are uppercase or lowercase 
         is_upper = piece.attr("fen").charCodeAt(0) < 91;
         is_upper_piece = piece_on_square.attr("fen").charCodeAt(0) < 91;
@@ -332,7 +361,7 @@ async function move_piece(moves, event, piece) {
         // if piece of different color, remove it
         piece_on_square.remove();
         
-        if (confirmation.king_in_check)
+        if (game_state.king_in_check)
             new Audio("../media/move-check.mp3").play();
         else
             new Audio("../media/capture.mp3").play()
@@ -341,7 +370,7 @@ async function move_piece(moves, event, piece) {
         if (killed_pawn !== null && !killed_pawn.empty()) {
             // remove killed pawn
             killed_pawn.remove();
-            if (confirmation.king_in_check)
+            if (game_state.king_in_check)
                 new Audio("../media/move-check.mp3").play();
             else
                 new Audio("../media/capture.mp3").play()
@@ -356,16 +385,15 @@ async function move_piece(moves, event, piece) {
             rook.attr("initial-pos", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")})`);
             new Audio("../media/castle.mp3").play();
         }
-        else if (confirmation.king_in_check)
+        else if (game_state.king_in_check)
             new Audio("../media/move-check.mp3").play();
         else
             new Audio("../media/move.mp3").play()
+    }
 
-        if (confirmation.checkmate != null) {
-            new Audio("../media/game-end.webm").play();
-            game_state.checkmate = confirmation.checkmate;
-            end_game()
-        }
+    if (game_state.checkmate != null) {
+        new Audio("../media/game-end.webm").play();
+        end_game()
     }
 
     piece = piece;
@@ -374,13 +402,20 @@ async function move_piece(moves, event, piece) {
     piece.attr("initial-pos", `translate(${nearest_square.attr("x")}, ${nearest_square.attr("y")})`);
 }
 
-function get_nearest_square(x, y, return_coords = false) {
-    const squareSize = parseInt(d3.select("svg#board").attr("square-size"));
-    const col = Math.min(Math.round((x - squareSize / 2) / squareSize), 7)
-    const row = Math.min(Math.round((y - squareSize / 2) / squareSize), 7);
+function get_square_absolute_position(rect) {
+    square_size = parseInt(d3.select("svg#board").attr("square-size"));
+    col = parseInt(rect.attr("j-index"));
+    row = parseInt(rect.attr("i-index"));
+    return [col * square_size + 4 * col + 4, row * square_size + 4 * row + 4];
+}
 
-    const snappedX = col * squareSize + 4 * col + 4 + 0.5
-    const snappedY = row * squareSize + 4 * row + 4 - 0.5
+function get_nearest_square(x, y, return_coords = false) {
+    const square_size = parseInt(d3.select("svg#board").attr("square-size"));
+    const col = Math.min(Math.round((x - square_size / 2) / square_size), 7)
+    const row = Math.min(Math.round((y - square_size / 2) / square_size), 7);
+
+    const snappedX = col * square_size + 4 * col + 4 + 0.5
+    const snappedY = row * square_size + 4 * row + 4 - 0.5
 
     nearest_square = d3.select(`rect[i-index="${row}"][j-index="${col}"]`);
     if (nearest_square.empty()) {

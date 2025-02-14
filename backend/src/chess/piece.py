@@ -352,6 +352,53 @@ class Piece:
                 board.undo_simulated_move()
         return possible_captures
     
+    def get_possible_actions(self, board) -> list[dict]:
+        """
+        Get ALL possibles actions for this piece at this position.
+
+        :return: list of actions, action: {"from": (int, int), "to": (int, int), ["promotion": str]}
+        :rtype: list[dict - Action]
+        """
+
+        possible_actions = []
+        for move in self.get_possible_moves(board):
+            if self.name == "P" and (
+                (self.color == 'w' and move[1] == 7) or
+                (self.color == 'b' and move[1] == 0)
+            ):
+                for promotion in ['Q', 'R', 'N', 'B']:
+                    possible_actions.append({
+                        "from": board.get_box(self.pos),
+                        "to": board.get_box(move),
+                        "promote": promotion
+                    })
+            else:
+                possible_actions.append({
+                    "from": board.get_box(self.pos),
+                    "to": board.get_box(move),
+                })
+
+        for capture in self.get_possible_captures(board):
+            if self.name == "P" and (
+                (self.color == 'w' and capture[1] == 7) or
+                (self.color == 'b' and capture[1] == 0)
+            ):
+                for promotion in ['Q', 'R', 'N', 'B']:
+                    possible_actions.append({
+                        "from": board.get_box(self.pos),
+                        "to": board.get_box(capture),
+                        "promote": promotion
+                    })
+            else:
+                possible_actions.append({
+                    "from": board.get_box(self.pos),
+                    "to": board.get_box(capture),
+                })
+
+        return possible_actions
+
+
+    
     def _check_move(self, new_pos, board) -> bool:
         """
         Check if the move is valid.
