@@ -15,7 +15,7 @@ class Message:
         return f"[Message<{self.type}>]: {message}"
     
     def to_json(self):
-        return json.dumps({"type": self.type, "data": {"message": self.content}})
+          return json.dumps({"type": self.type, "data": {"message": self.content}})
     
     @staticmethod
     def from_json(json_str):

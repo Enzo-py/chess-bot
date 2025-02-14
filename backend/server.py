@@ -65,7 +65,7 @@ class Server:
         while self.server.running:
             await asyncio.sleep(2)
 
-    def start_game(self, info):
+    async def start_game(self, info):
         """
         Start a new game with the given info.
         """
@@ -96,6 +96,9 @@ class Server:
             "current_player": self.focused_game.current_player
         }
         asyncio.create_task(self.server.broadcast(protocol.Message("game-started", ctn).to_json()))
+
+        # wait 1s before playing the first move
+        await asyncio.sleep(0.8)
         self.focused_game.play_algo_move()
 
     def get_possible_moves(self, info):
@@ -147,7 +150,8 @@ class Server:
         ctn = {
             "FEN": self.focused_game.to_FEN(),
             "king_in_check": self.focused_game.board.king_in_check['w'] or self.focused_game.board.king_in_check['b'],
-            "checkmate": self.focused_game.board.checkmate
+            "checkmate": self.focused_game.board.checkmate,
+            "draw": self.focused_game.board.draw,
         }
 
         asyncio.create_task(self.server.broadcast(protocol.Message("confirm-move", ctn).to_json()))
@@ -161,11 +165,17 @@ class Server:
             "FEN": self.focused_game.to_FEN(),
             "king_in_check": self.focused_game.board.king_in_check['w'] or self.focused_game.board.king_in_check['b'],
             "checkmate": self.focused_game.board.checkmate,
+            "draw": self.focused_game.board.draw,
             "from": action["from"].upper(),
             "to": action["to"].upper(),
             "promote": action.get("promote")
         }
         asyncio.create_task(self.server.broadcast(protocol.Message("ai-move", ctn).to_json()))
+        
+        async def play():
+            await asyncio.sleep(0.8)
+            self.focused_game.play_algo_move()
+        asyncio.create_task(play())
 
     def get_players_list(self):
         """

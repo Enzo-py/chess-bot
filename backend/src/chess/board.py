@@ -47,6 +47,7 @@ class Board:
         self.before_simulation_state = None
         self.simulated_moves = []
         self.checkmate = None
+        self.draw = None
 
         self.setup()
 
@@ -214,7 +215,6 @@ class Board:
         else:
             self.black_pieces.add(new_piece)
 
-
         self.check_state()
 
     def check_state(self, simulated=False):
@@ -251,6 +251,47 @@ class Board:
             self.checkmate = Player.BLACK
         else:
             self.checkmate = None
+
+    
+    def check_for_draw(self, color, half_moves):
+        # 0. check for half moves
+        # 1. check insufficient material
+        # 2. check 3-fold repetition
+        # 3. check stalemate
+
+        if half_moves >= 50:
+            self.draw = 'fifty-half-moves'
+            return
+
+        if color == Player.WHITE:
+            focus_pieces = self.white_pieces
+        else:
+            focus_pieces = self.black_pieces
+
+        # nb_pieces = {}
+        # for piece in focus_pieces:
+        #     if piece.name not in nb_pieces:
+        #         nb_pieces[piece.name] = 0
+        #     nb_pieces[piece.name] += 1
+
+        # if len(focus_pieces) == 1: 
+        #     self.draw = 'insufficient-material'
+        #     return
+        # if len(focus_pieces) == 2:
+        #     if "B" in nb_pieces or "N" in nb_pieces:
+        #         self.draw = 'insufficient-material'
+        #         return
+                
+        # 2. check 3-fold repetition
+        ...
+
+        # 3. check stalemate
+        for piece in focus_pieces:
+            if len(piece.get_possible_moves(self)) > 0 or len(piece.get_possible_captures(self)) > 0:
+                self.draw = None
+                return
+        self.draw = 'stalemate'
+                
 
     def move(self, start, end):
         """

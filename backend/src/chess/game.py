@@ -62,7 +62,7 @@ class Game:
         self.nb_moves = int(right_part[5])
 
     def move(self, start, end):
-        if self.board.checkmate:
+        if self.board.checkmate or self.board.draw is not None:
             raise Exception("Game is over")
         
         piece = self.board.get(start)
@@ -81,11 +81,13 @@ class Game:
 
         self.board.move(start, end)
 
+        self.board.check_for_draw(Player.WHITE if self.current_player == Player.BLACK else Player.BLACK, self.nb_half_moves)
+
     def play_algo_move(self):
         """
         Get the move from the AI.
         """
-        if self.board.checkmate: return
+        if self.board.checkmate or self.board.draw is not None: return
         if self.current_player == Player.WHITE and issubclass(type(self.white), Player):
             action = self.white.play(list(self.board.white_pieces))
         elif self.current_player == Player.BLACK and issubclass(type(self.black), Player):
@@ -98,8 +100,8 @@ class Game:
         
         self.move(action["from"], action["to"])
 
-        if "promotion" in action:
-            self.board.promote(action["to"], action["promotion"])
+        if "promote" in action:
+            self.board.promote(action["to"], action["promote"])
 
         if self.ia_move_handler is not None: self.ia_move_handler(action)
         return action

@@ -148,7 +148,8 @@ class Piece:
 
                 x, y = pattern
                 new_pos = (self.pos[0] + x, self.pos[1] + y * y_direction)
-                if self._check_move(new_pos, board):
+                interm_pos = (self.pos[0] + x, self.pos[1] + 1 * y_direction)
+                if self._check_move(new_pos, board) and self._check_move(interm_pos, board):
                     possible_moves.append(new_pos)
             
             elif name == 'kingside-castling':
@@ -191,7 +192,7 @@ class Piece:
                     possible_moves.remove(move)
         
         # check if the king is not in check after the move
-        if not check_attackers and self.name != 'K':
+        if not check_attackers:
             for move in possible_moves.copy():
                 board.simulate_move(start=self.pos, end=move)
                 if board.check_nb_attackers(board.get_king(self.color).pos, 'b' if self.color == 'w' else 'w') > 0:
@@ -284,8 +285,7 @@ class Piece:
                         if self._check_capturable(new_pos, board): possible_captures.append(new_pos)
                         if not self._check_move(new_pos, board):
                             if not self.can_jump_over_pieces: break
-                            continue
-                        
+                            continue           
 
             # basic movement
             new_pos = (self.pos[0] + x, self.pos[1] + y * y_direction)
@@ -337,7 +337,7 @@ class Piece:
                     possible_captures.remove(move)
         
         # check if the king is not in check after the move
-        if not check_attackers and self.name != 'K':
+        if not check_attackers:
             for move in possible_captures.copy():
                 board.simulate_move(start=self.pos, end=move)
                 if board.check_nb_attackers(board.get_king(self.color).pos, 'b' if self.color == 'w' else 'w') > 0:
