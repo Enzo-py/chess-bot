@@ -18,6 +18,9 @@
     --success-color-light: #9ddc9d;
     --secondary-color-light: #7793ca;
     --warning-color: #9f8625;
+
+    --white-box: #EDD6AF;
+    --black-box: #B88761;
 }
 
 body, body * {

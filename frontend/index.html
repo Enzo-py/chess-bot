@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="css/global.css">
+    <link rel="stylesheet" href="css/chess.css">
 
     <script src="js/d3.v7.min.js"></script>
+    <script src="js/chess_func.js"></script>
     <script src="js/toolbox.js"></script>
     <script src="js/message.js"></script>
 
@@ -15,8 +17,93 @@
 <body>
     <div id="loading-screen"><div class="spinner"></div><p></p></div>
 
+    <header>
+        <menu class="right">
+            <button id="start-game" class="material-symbols-outlined" title="play" onclick="start_game(this)">chess</button>
+        </menu>
+    </header>
+
+    <main>
+        <div class="board-container">
+
+        </div>
+    </main>
+
     <script>
         const socket = new WebSocket("ws://127.0.0.1:9000");
+        const socket_data = {last_message: null};
+
+        function start_game() {
+            ctn = `
+                <span class="title">Start a game</span>
+                <div class="form">
+                    <label for="game-mode">Game mode</label>
+                    <select id="game-mode" onchange="game_mode_change()">
+                        <option value="PvP">Player vs Player</option>
+                        <option value="PvAI" selected >Player vs AI</option>
+                        <option value="AIvAI">AI vs AI</option>
+                    </select>
+                    
+                    <div class="ai-selection-block">
+                        <label for="ai-selection">AI selection</label>
+                        <select id="ai-selection">
+                            <option value="1">... (coming soon)</option>
+                        </select>
+                    </div>
+
+                    <div class="ai-vs-ai-block">
+                        <label for="ai1-selection">AI 1 selection</label>
+                        <select id="ai1-selection">
+                            <option value="1">... (coming soon)</option>
+                        </select>
+
+                        <label for="ai2-selection">AI 2 selection</label>
+                        <select id="ai2-selection">
+                            <option value="1">... (coming soon)</option>
+                        </select>
+                    </div>
+
+                    <label for="player-color">Player color</label>
+                    <select id="player-color">
+                        <option value="1">White</option>
+                        <option value="2">Black</option>
+                    </select>
+                </form>
+            `
+
+            pop_up_confirm(ctn, start_game_confirm);
+        }
+
+        function start_game_confirm() {
+            game_mode = d3.select("#game-mode").node().value;
+            player_color = d3.select("#player-color").node().value;
+            
+            if (game_mode == "PvAI") {
+                ai_selection = d3.select("#ai-selection").node().value;
+                send_message("start-game", {game_mode: game_mode, player_color: player_color, ai_selection: ai_selection}, true, "Starting game...");
+            } else if (game_mode == "AIvAI") {
+                ai1_selection = d3.select("#ai1-selection").node().value;
+                ai2_selection = d3.select("#ai2-selection").node().value;
+                send_message("start-game", {game_mode: game_mode, player_color: player_color, ai1_selection: ai1_selection, ai2_selection: ai2_selection}, true, "Starting game...");
+            } else {
+                send_message("start-game", {game_mode: game_mode, player_color: player_color}, true, "Starting game...");
+            }
+        }
+
+        function game_mode_change() {
+            game_mode = d3.select("#game-mode").node().value;
+            if (game_mode == "PvAI") {
+                d3.select(".ai-selection-block").style("display", "flex");
+            } else {
+                d3.select(".ai-selection-block").style("display", "none");
+            }
+
+            if (game_mode == "AIvAI") {
+                d3.select(".ai-vs-ai-block").style("display", "flex");
+            } else {
+                d3.select(".ai-vs-ai-block").style("display", "none");
+            }
+        }
     
         function send_message(type, data, waiting_screen = false, msg = '') {
             // console.log("Sending message to server", type, waiting_screen);
@@ -29,18 +116,40 @@
             socket.send(JSON.stringify({type: type, data: data}));
         }
 
+        async function wait_for_message(type, timeout = 10000, only_content = false) {
+            let start = Date.now();
+            while (socket_data.last_message == null || socket_data.last_message.type != type) {
+                if (Date.now() - start > timeout) {
+                    return null;
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+            last_message = socket_data.last_message;
+            socket_data.last_message = null;
+            if (last_message.type == type) {
+                if (only_content && last_message.data && last_message.data.message)
+                    return last_message.data.message
+                else if (only_content && last_message.data)
+                    return last_message.data
+                else
+                    return last_message;
+            } else {
+                return null;
+            }
+        }
+
         socket.onerror = (error) => {
             console.error("Error in WebSocket connection", error);
         };
         
         socket.onmessage = (event) => {
             content = read_message(event);
+            socket_data.last_message = content;
             if (content && content.type == 'error') {
                 toast("error", content.data.message);
             }
 
-            
-            console.log("Received message from server");
+            console.log("Received message from server", content);
             waiting_for_response = false;
             d3.select("#loading-screen").style("display", "none");
             d3.select("#loading-screen p").text("");

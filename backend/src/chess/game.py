@@ -1,5 +1,5 @@
-from board import Board
-from player import Player
+from .board import Board
+from .player import Player
 
 class Game:
 
@@ -18,6 +18,10 @@ class Game:
         }
         self.en_passant = None
 
+        # Players (can be AI or human)
+        self.white = None
+        self.black = None
+
     def to_FEN(self):
         left_part = self.board.to_FEN()
         right_part = f"{'w' if self.current_player == Player.WHITE else 'b'}"
@@ -33,12 +37,14 @@ class Game:
             black_castling += "q"
         right_part += white_castling if white_castling else " -"
         right_part += black_castling if black_castling else " -"
-        right_part += f" {self.en_passant}" if self.en_passant else "-"
+        right_part += f" {self.board.get_box(self.en_passant) if self.en_passant is not None else '-'}"
         right_part += f" {self.nb_half_moves} {self.nb_moves}"
         return f"{left_part} {right_part}"
     
     def from_FEN(self, fen):
-        left_part, right_part = fen.split(" ")
+        left_part = fen.split(" ")[0]
+        right_part = fen.split(" ")[1:]
+
         self.board.from_FEN(left_part)
         self.current_player = Player.WHITE if right_part[0] == "w" else Player.BLACK
         self.available_castling = {
@@ -53,9 +59,10 @@ class Game:
             self.available_castling[Player.BLACK]["king"] = True
         if "q" in right_part:
             self.available_castling[Player.BLACK]["queen"] = True
-        self.en_passant = right_part[2] if right_part[1] != "-" else None
-        self.nb_half_moves = int(right_part[3])
-        self.nb_moves = int(right_part[4])
+        
+        self.en_passant = self.board.get_coords(right_part[3]) if right_part[3] != "-" else None
+        self.nb_half_moves = int(right_part[4])
+        self.nb_moves = int(right_part[5])
 
     def move(self, start, end):
         piece = self.board.get(start)
@@ -69,10 +76,10 @@ class Game:
         if not self.board.is_valid_position(end_coords):
             raise Exception("Invalid position", end)
         
-        self._update_state(piece, start, end)
+        start_coords = self.board.get_coords(start)
+        self._update_state(piece, start_coords, end_coords)
 
         self.board.move(start, end)
-        self.current_player = 1 - self.current_player
 
     def _update_state(self, piece, start, end):
         """
@@ -83,17 +90,30 @@ class Game:
             - Update the en passant square
         """
         self.nb_moves += 1
+        self.current_player = Player.WHITE if self.current_player == Player.BLACK else Player.BLACK
         if piece.name == "P" or self.board.get(end) is not None:
             self.nb_half_moves = 0
         else:
             self.nb_half_moves += 1
 
-        x_start, y_start = self.board.get_coords(start)
-        x_end, y_end = self.board.get_coords(end)
+        # check if previous en passant was played
+        if self.en_passant is not None:
+            en_passant = self.board.get(self.en_passant, _exception=False)
+            if en_passant is not None and en_passant.name == "P":
+                killed_pawn = self.en_passant[0], self.en_passant[1] + (1 if piece.color == Player.WHITE else -1)
+                killed_pawn = self.board.get(killed_pawn, _exception=False)
+                if killed_pawn is not None and killed_pawn.name == "P" and killed_pawn.color != piece.color:
+                    self.board.remove_piece(killed_pawn)
+
+        x_start, y_start = start
+        x_end, y_end = end
+        
         if piece.name == "P" and abs(y_end - y_start) == 2:
             self.en_passant = (x_start, (y_start + y_end) // 2)
         else:
             self.en_passant = None
+
+        self.board.en_passant = self.en_passant
 
         if piece.name == "K":
             self.available_castling[piece.color]["king"] = False
@@ -103,6 +123,10 @@ class Game:
                 self.available_castling[piece.color]["queen"] = False
             elif (x_start == 7 and y_start == 0) or (x_start == 0 and y_start == 7):
                 self.available_castling[piece.color]["king"] = False
+
+    def play(self, white, black):
+        self.white = white
+        self.black = black
 
 
 if __name__ == "__main__":

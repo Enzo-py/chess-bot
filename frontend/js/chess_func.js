@@ -1,0 +1,331 @@
+const game_state = {
+    turn: "w",
+    en_passant: "-",
+    halfmove_clock: 0,
+    fullmove_number: 0,
+    castling: {'K': true, 'Q': true, 'k': true, 'q': true}
+}
+
+var saved_possible_moves = {
+
+}
+
+function update_game_state(full_fen) {
+    // ex: rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQ kq (3, 2) 0 1
+    let [fen, turn, castling_w, castling_b, en_passant, halfmove_clock, fullmove_number] = full_fen.split(" ");
+    game_state.turn = turn;
+    game_state.en_passant = en_passant;
+    game_state.halfmove_clock = halfmove_clock;
+    game_state.fullmove_number = fullmove_number;
+    game_state.castling = {
+        'K': castling_w.includes("K"),
+        'Q': castling_w.includes("Q"),
+        'k': castling_b.includes("k"),
+        'q': castling_b.includes("q")
+    }
+}
+
+async function draw_game(board_fen) {
+    board = d3.select("svg#board");
+    if (board.empty()) {
+        d3.select(".board-container").append("svg").attr("id", "board");
+        board = d3.select("svg#board");
+    }
+    board.selectAll("*").remove();
+
+    // we want dynamic board size: the size of the board depends on the size of the window (css)
+    // we want to keep the aspect ratio of the board
+
+    board_size = board.node().getBoundingClientRect().width;
+    square_size = parseInt((board_size - 30) / 8);
+    board.attr("square-size", square_size);
+
+    const columns = "ABCDEFGH";
+    const rows = "87654321";
+
+    board_boxes = board.append("g").attr("id", "board-boxes");
+    possible_move_draw = board.append("g").attr("id", "possible-moves");
+    board_pieces = board.append("g").attr("id", "board-pieces");
+    board_labels = board.append("g").attr("id", "board-labels");
+
+    board_boxes.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
+    board_pieces.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
+    board_labels.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
+    possible_move_draw.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
+
+    // draw squares
+    for (let i = 0; i < 8; i++) {
+        for (let j = 0; j < 8; j++) {
+            const boxId = `${columns[j]}${rows[i]}`;
+            board_boxes.append("rect")
+                .attr("x", j * square_size)
+                .attr("y", i * square_size)
+                .attr("width", square_size)
+                .attr("height", square_size)
+                .attr("fill", (i + j) % 2 == 0 ? "var(--white-box)" : "var(--black-box)")
+                .attr("id", boxId)
+                .attr("i-index", i)
+                .attr("j-index", j);
+        }
+    }
+
+    // border labels
+    for (let i = 0; i < 8; i++) {
+        // Column letters (bottom)
+        board_labels.append("text")
+            .attr("x", i * square_size + square_size / 2)
+            .attr("y", 8 * square_size + 15)
+            .attr("text-anchor", "middle")
+            .attr("font-size", "12px")
+            .text(columns[i]);
+
+        // Row numbers (left side)
+        board_labels.append("text")
+            .attr("x", -10)
+            .attr("y", i * square_size + square_size / 2)
+            .attr("text-anchor", "end")
+            .attr("alignment-baseline", "middle")
+            .attr("font-size", "12px")
+            .text(rows[i]);
+    }
+
+
+    // load pieces (auto check if already loaded)
+    await load_pieces()
+
+    // draw pieces
+    // draw_piece("R", "A8");
+    // draw_piece("N", "B1");
+    // draw_piece("b", "C3");
+    draw_from_fen(board_fen);
+}
+
+function draw_from_fen(fen) {
+    board = d3.select("svg#board");
+    board_pieces = board.select("g#board-pieces");
+    board_pieces.selectAll("*").remove();
+
+    const [pieces, turn] = fen.split(" ");
+    const rows = pieces.split("/");
+    const columns = "ABCDEFGH";
+
+    for (let i = 0; i < 8; i++) {
+        let j = 0;
+        for (let char of rows[i]) {
+            if (isNaN(char)) {
+                draw_piece(char, `${columns[j]}${8-i}`);
+                j++;
+            }
+            else {
+                j += parseInt(char);
+            }
+        }
+    }
+}
+
+async function load_pieces() {
+    let data = await d3.xml("../media/chess_pieces.svg");
+
+    let svg_pieces = d3.select(data).selectAll("svg g");
+
+    let defs = d3.select("body").append("svg")
+        .attr("id", "pieces-defs")
+        .attr("width", 0)
+        .attr("height", 0);
+
+    svg_pieces.each(function() {
+        defs.node().appendChild(this.cloneNode(true));
+    });
+}
+
+function draw_piece(piece, box_id) {
+    // piece == fen notation
+    piece_svg = d3.select(`#pieces-defs g[fen="${piece}"]`).clone(true).node();
+
+    pieces_layer = d3.select("svg#board g#board-pieces");
+    box = d3.select(`#${box_id}`);
+
+    width_scale = square_size / 45;
+    height_scale = square_size / 45;
+
+    pieces_layer.append(() => piece_svg)
+        .attr("transform", `translate(${box.attr("x")}, ${box.attr("y")}) scale(${width_scale}, ${height_scale})`)
+        .attr("initial-scale", `${width_scale}, ${height_scale}`)
+        .attr("initial-pos", `translate(${box.attr("x")}, ${box.attr("y")})`)
+        .attr("pos", box_id)
+        .call(dragHandler);
+}
+
+function get_piece_color(piece_fen) {
+    return piece_fen.charCodeAt(0) < 91 ? "w" : "b";
+}
+
+// Define drag behavior
+const dragHandler = d3.drag()
+    .on("start", function (event) {
+        // check if it's the player's turn
+        let piece = d3.select(this)
+        if (game_state.turn != get_piece_color(piece.attr("fen"))) return;
+        piece_id = piece.attr("fen") + piece.attr("pos");
+        piece.raise()
+
+        if (saved_possible_moves[piece_id] === undefined) {
+            send_message("get-possible-moves", {
+                fen: piece.attr("fen"),
+                pos: piece.attr("pos")
+            });
+
+            wait_for_message("possible-moves", timeout=5, only_content=true).then((data) => {
+                if (data === null) {
+                    piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
+                    return; // Timeout: error will be return by the server
+                }
+                saved_possible_moves[piece_id] = data.moves
+                draw_possible_moves(piece)
+            });
+        }
+        draw_possible_moves(piece);
+    })
+    .on("drag", function (event) {
+        if (game_state.turn != get_piece_color(d3.select(this).attr("fen"))) return;
+        drag_x = event.x - square_size / 2;
+        drag_y = event.y - square_size / 2;
+
+        drag_x = Math.max(0, drag_x);
+        drag_x = Math.min(drag_x, 8 * square_size - square_size);
+        drag_y = Math.max(0, drag_y);
+        drag_y = Math.min(drag_y, 8 * square_size - square_size);
+
+        d3.select(this)
+            .attr("transform", `translate(${drag_x}, ${drag_y}) scale(${d3.select(this).attr("initial-scale")})`);
+        
+        d3.selectAll("rect.highlight").classed("highlight", false); // Remove all highlights
+        nearest_square = get_nearest_square(event.x, event.y);
+        nearest_square.classed("highlight", true).raise(); // Highlight nearest square
+
+    })
+    .on("end", function (event) {
+        if (game_state.turn != get_piece_color(d3.select(this).attr("fen"))) return;
+        d3.select("svg#board g#possible-moves").selectAll("*").remove();
+
+        let piece = d3.select(this);
+        piece_id = piece.attr("fen") + piece.attr("pos");
+
+        if (saved_possible_moves[piece_id] !== undefined) {
+            move_piece(saved_possible_moves[piece_id], event, piece);
+            return;
+        }
+
+        send_message("get-possible-moves", {
+            fen: d3.select(this).attr("fen"),
+            pos: d3.select(this).attr("pos")
+        });
+
+        wait_for_message("possible-moves", timeout=5, only_content=true).then((data) => {
+            if (data === null) {
+                d3.select(this).attr("transform", `${d3.select(this).attr("initial-pos")} scale(${d3.select(this).attr("initial-scale")})`);
+                return; // Timeout: error will be return by the server
+            }
+            saved_possible_moves[piece_id] = data.moves;
+            move_piece(data.moves, event, d3.select(this));
+        });
+    });
+
+function draw_possible_moves(piece) {
+    piece_id = piece.attr("fen") + piece.attr("pos");
+    if (saved_possible_moves[piece_id] === undefined) return;
+    square_size = parseInt(d3.select("svg#board").attr("square-size"));
+
+    possible_move_draw = d3.select("svg#board g#possible-moves");
+    saved_possible_moves[piece_id].forEach((move) => {
+        rect = d3.select(`rect#${move}`);
+        possible_move_draw.append("circle")
+            .attr("cx", parseInt(rect.attr("x")) + square_size / 2)
+            .attr("cy", parseInt(rect.attr("y")) + square_size / 2)
+            .attr("r", 10)
+            .attr("fill", "gray")
+            .attr("fill-opacity", 0.5)
+    })
+}
+
+async function move_piece(moves, event, piece) {
+    let nearest_square = get_nearest_square(event.x, event.y)
+
+    if (moves === null || !moves.includes(nearest_square.attr("id"))) {
+        piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
+        toast("warning", "Invalid move: piece cannot move to that square.");
+        return;
+    }
+
+    
+    piece_on_square = d3.select(`g#board-pieces g[pos="${nearest_square.attr("id")}"]`);
+    let killed_pawn = null;
+    if (nearest_square.attr("id").toLowerCase() == game_state.en_passant) {
+        if (piece.attr("fen").toLowerCase() == "p") {
+            direction = piece.attr("fen").charCodeAt(0) < 91 ? 1 : -1;
+            pos = nearest_square.attr("id")[0] + (parseInt(nearest_square.attr("id")[1]) - direction);
+            killed_pawn = d3.select(`g#board-pieces g[pos="${pos}"]`);
+        }
+    }
+
+    send_message("move-piece", {
+        piece: piece.attr("fen"),
+        start: piece.attr("pos"),
+        end: nearest_square.attr("id")
+    });
+
+    confirmation = await wait_for_message("confirm-move", timeout=5, only_content=true)
+    if (confirmation === null) {
+        piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
+        return;
+    }
+
+    saved_possible_moves = {} // reset
+    snap_to_square(piece, event.x, event.y);
+    if (!piece_on_square.empty()) {
+        // if piece of the same color, return to initial position: check if the both fen are uppercase or lowercase 
+        is_upper = piece.attr("fen").charCodeAt(0) < 91;
+        is_upper_piece = piece_on_square.attr("fen").charCodeAt(0) < 91;
+        if (is_upper == is_upper_piece) {
+            piece.attr("transform", `${piece.attr("initial-pos")} scale(${piece.attr("initial-scale")})`);
+            toast("warning", "Invalid move: destination square is occupied by a piece of the same color.");
+            return;
+        }
+
+        // if piece of different color, remove it
+        piece_on_square.remove();
+        new Audio("../media/capture.mp3").play()
+
+    } else {
+        if (killed_pawn !== null && !killed_pawn.empty()) {
+            // remove killed pawn
+            killed_pawn.remove();
+            new Audio("../media/capture.mp3").play()
+        } else
+            new Audio("../media/move.mp3").play()
+    }
+
+    piece = piece;
+
+    piece.attr("pos", nearest_square.attr("id"));
+    piece.attr("initial-pos", `translate(${nearest_square.attr("x")}, ${nearest_square.attr("y")})`);
+}
+
+function get_nearest_square(x, y, return_coords = false) {
+    const squareSize = parseInt(d3.select("svg#board").attr("square-size"));
+    const col = Math.round((x - squareSize / 2) / squareSize);
+    const row = Math.round((y - squareSize / 2) / squareSize);
+
+    const snappedX = col * squareSize;
+    const snappedY = row * squareSize;
+
+    if (return_coords) 
+        return [snappedX, snappedY];
+    return d3.select(`rect[i-index="${snappedY / squareSize}"][j-index="${snappedX / squareSize}"]`);
+}
+
+// Function to snap piece to nearest square
+function snap_to_square(piece, x, y) {
+    const [snappedX, snappedY] = get_nearest_square(x, y, true);
+    piece.attr("transform", `translate(${snappedX}, ${snappedY}) scale(${piece.attr("initial-scale")})`);
+}

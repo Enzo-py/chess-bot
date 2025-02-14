@@ -1,5 +1,5 @@
-import piece as p
-from player import Player
+from . import piece as p
+from .player import Player
 
 
 class Board:
@@ -32,6 +32,8 @@ class Board:
 
         self.white_pieces = set()
         self.black_pieces = set()
+
+        self.en_passant = None
 
         self.setup()
 
@@ -81,9 +83,33 @@ class Board:
     def get_coords(self, pos):
         """
         Get the coordinates of the given position.
+        pos: str
+            from 'A1' to 'H8'
+        
+        return: tuple
+            (x, y)
         """
         letter, number = pos
+        letter, number = letter.lower(), int(number)
         return ord(letter) - 97, int(number) - 1
+    
+    def get_box(self, coords):
+        """
+        Get the box name for the given coordinates.
+        """
+        x, y = coords
+        return chr(x + 97) + str(y + 1)
+    
+    def remove_piece(self, piece):
+        """
+        Remove the given piece from the board.
+        """
+        box = self.get_box(piece.pos)
+        self.board[box[0].lower()][piece.pos[1]] = None
+        if piece.color == Player.WHITE:
+            self.white_pieces.remove(piece)
+        else:
+            self.black_pieces.remove(piece)
     
     def move(self, start, end):
         """
@@ -100,13 +126,10 @@ class Board:
             if piece.color == piece_end.color:
                 raise ValueError(f"Cannot capture piece of the same color at position {end}")
             
-            if piece.color == Player.WHITE:
-                self.black_pieces.remove(piece_end)
-            else:
-                self.white_pieces.remove(piece_end)
+            self.remove_piece(piece_end)
 
-        self.board[start[0]][int(start[1]) - 1] = None
-        self.board[end[0]][int(end[1]) - 1] = piece
+        self.board[start[0].lower()][int(start[1]) - 1] = None
+        self.board[end[0].lower()][int(end[1]) - 1] = piece
 
         piece.pos = end_coords
 
@@ -128,7 +151,7 @@ class Board:
                         fen += str(empty)
                         empty = 0
                     # Use lowercase for White and uppercase for Black, adjust as needed
-                    fen += piece.name.lower() if piece.color == Player.WHITE else piece.name.upper()
+                    fen += piece.fen()
             if empty > 0:
                 fen += str(empty)
             # Add a slash between ranks, except after the last one
@@ -147,7 +170,11 @@ class Board:
                 if letter.isdigit():
                     x += int(letter)
                 else:
-                    self.board[chr(97 + x)][7 - i] = p.Piece.from_name(letter)
+                    self.board[chr(97 + x)][7 - i] = p.Piece.from_name(letter, (x, 7 - i))
+                    if letter.isupper():
+                        self.white_pieces.add(self.board[chr(97 + x)][7 - i])
+                    else:
+                        self.black_pieces.add(self.board[chr(97 + x)][7 - i])
                     x += 1
     
     def setup(self):

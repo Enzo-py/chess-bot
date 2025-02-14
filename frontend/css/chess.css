@@ -1,0 +1,19 @@
+
+main {
+    display: flex;
+    justify-content: center;
+}
+
+.board-container, #board {
+    width: 90svh;
+    height: 90svh;
+}
+
+.board-container #board rect.highlight {
+    stroke-width: 4px;
+    stroke: #fff;
+}
+
+.board-container #board g#board-pieces > g {
+    cursor: pointer;
+}

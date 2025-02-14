@@ -1,7 +1,7 @@
 
 class Player:
-    WHITE = 0
-    BLACK = 1 # HARD-CODED in piece.py
+    WHITE = 'w'
+    BLACK = 'b' # HARD-CODED in piece.py and server.py
 
     def __init__(self, color):
         self.color = color
