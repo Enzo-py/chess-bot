@@ -16,5 +16,11 @@
         "type": "AI",
         "elo": 600,
         "games": []
+    },
+    {
+        "model": "Stockfish AI",
+        "type": "AI",
+        "elo": 600,
+        "games": []
     }
 ]

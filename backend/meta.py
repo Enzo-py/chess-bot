@@ -1,9 +1,11 @@
 from models.random_ai import RandomAI
 from models.greedy_ai import GreedyAI
+from models.stockfish import StockfishAI
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
     "Greedy AI": GreedyAI,
+    "Stockfish AI": StockfishAI,
 }
 """
 This dictionary exposes all the models that are available for testing or using in the interface.

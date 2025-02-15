@@ -21,6 +21,7 @@
 ### Prerequisites
 - Python 3.x
 - Run `pip install -r requirements.txt` to install the required packages.
+- To use stockfish, download the binary from [stockfishchess.org](https://stockfishchess.org/download/) and put the correct path in `backend/models/stockfish.py`.
 
 ### Running the Project
 1. Run the backend server: `python backend/server.py`
