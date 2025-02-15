@@ -130,22 +130,55 @@ class Board:
     def global_moves_update(self, start, end, piece: p.Piece, simulated=False):
         """
         Update the global board state after a move.
+
+        start: str
+            start position
+
+        end: str
+            end position
+
+        piece: Piece
+            piece moved
+
+        simulated: bool
+            if the move is simulated
         """
 
         # check if castling was played
-        if piece.name == "K" and self.available_castling[piece.color]["king"]:
-            if end == "G1" or end == "G8":
-                if not simulated:
-                    self.move("H" + end[1], "F" + end[1])
-                else:
-                    self.simulate_move("H" + end[1], "F" + end[1])
+        # if piece.name == "K" and self.available_castling[piece.color]["king"]:
+        #     if end == "G1" or end == "G8":
+        #         if not simulated:
+        #             self.move("H" + end[1], "F" + end[1])
+        #         else:
+        #             self.simulate_move("H" + end[1], "F" + end[1])
 
-        elif piece.name == "K" and self.available_castling[piece.color]["queen"]:
-            if end == "C1" or end == "C8":
+        # elif piece.name == "K" and self.available_castling[piece.color]["queen"]:
+        #     if end == "C1" or end == "C8":
+        #         if not simulated:
+        #             self.move("A" + end[1], "D" + end[1])
+        #         else:
+        #             self.simulate_move("A" + end[1], "D" + end[1])
+        x_start, y_start = self.get_coords(start)
+        x_end, y_end = self.get_coords(end)
+
+        # check castling
+        if piece.name == "K" and abs(x_end - x_start) == 2:
+            if x_end == 6: # king side
+                if not self.available_castling[piece.color]["king"]:
+                    raise ValueError("Cannot castle king side")
+                
                 if not simulated:
-                    self.move("A" + end[1], "D" + end[1])
+                    self.move("H" + start[1], "F" + start[1])
                 else:
-                    self.simulate_move("A" + end[1], "D" + end[1])
+                    self.simulate_move("H" + start[1], "F" + start[1])
+            elif x_end == 2: # queen side
+                if not self.available_castling[piece.color]["queen"]:
+                    raise ValueError("Cannot castle queen side")
+                
+                if not simulated:
+                    self.move("A" + start[1], "D" + start[1])
+                else:
+                    self.simulate_move("A" + start[1], "D" + start[1])
 
         # check if previous en passant was played
         if self.en_passant is not None:
@@ -157,9 +190,6 @@ class Board:
                     self.remove_piece(killed_pawn)
 
         # update en passant
-        x_start, y_start = self.get_coords(start)
-        x_end, y_end = self.get_coords(end)
-        
         if piece.name == "P" and abs(y_end - y_start) == 2:
             self.en_passant = (x_start, (y_start + y_end) // 2)
         else:
@@ -286,10 +316,14 @@ class Board:
         ...
 
         # 3. check stalemate
+        if self.king_in_check[color]:
+            self.draw = None
+            return
         for piece in focus_pieces:
             if len(piece.get_possible_moves(self)) > 0 or len(piece.get_possible_captures(self)) > 0:
                 self.draw = None
                 return
+            
         self.draw = 'stalemate'
                 
 
@@ -404,7 +438,13 @@ class Board:
                 if pos in piece.get_possible_captures(self, check_attackers=True) or pos in piece.get_possible_moves(self, check_attackers=True):
                     attackers += 1
 
-        return attackers                    
+        return attackers     
+
+    def get_pieces(self, color) -> list[p.Piece]:
+        """
+        Get the pieces of the given color.
+        """
+        return list(self.white_pieces if color == Player.WHITE else self.black_pieces)              
 
     def to_FEN(self):
         """

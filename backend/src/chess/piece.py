@@ -14,6 +14,7 @@ class Piece:
 
         self.pos = pos
         self.name = ''
+        self.value = 0
 
         self.strict_movement = False
         """
@@ -356,7 +357,7 @@ class Piece:
         """
         Get ALL possibles actions for this piece at this position.
 
-        :return: list of actions, action: {"from": (int, int), "to": (int, int), ["promotion": str]}
+        :return: list of actions, action: {"from": BoxName, "to": BoxName, ["promotion": str]}
         :rtype: list[dict - Action]
         """
 
@@ -396,8 +397,6 @@ class Piece:
                 })
 
         return possible_actions
-
-
     
     def _check_move(self, new_pos, board) -> bool:
         """
@@ -450,12 +449,18 @@ class Piece:
             return King(color, pos)
         
         raise ValueError(f'Invalid piece name: {name}')
+    
+    @staticmethod
+    def value_of(name):
+        p = Piece.from_name(name, (0, 0))
+        return p.value
 
 class Pawn(Piece):
 
     def __init__(self, color, pos):
         super().__init__(color, pos)
         self.name = 'P'
+        self.value = 1
         self.strict_movement = True
 
         self.movement_patterns.extend([
@@ -478,6 +483,7 @@ class Rook(Piece):
     def __init__(self, color, pos):
         super().__init__(color, pos)
         self.name = 'R'
+        self.value = 5
         self.strict_movement = False
 
         self.movement_patterns.extend([
@@ -494,6 +500,7 @@ class Knight(Piece):
     def __init__(self, color, pos):
         super().__init__(color, pos)
         self.name = 'N'
+        self.value = 3
         self.strict_movement = True
         self.can_jump_over_pieces = True
 
@@ -515,6 +522,7 @@ class Bishop(Piece):
     def __init__(self, color, pos):
         super().__init__(color, pos)
         self.name = 'B'
+        self.value = 3
         self.strict_movement = False
 
         self.movement_patterns.extend([
@@ -531,6 +539,7 @@ class Queen(Piece):
     def __init__(self, color, pos):
         super().__init__(color, pos)
         self.name = 'Q'
+        self.value = 9
         self.strict_movement = False
 
         self.movement_patterns.extend([
@@ -551,6 +560,7 @@ class King(Piece):
     def __init__(self, color, pos):
         super().__init__(color, pos)
         self.name = 'K'
+        self.value = 100
         self.strict_movement = True
 
         self.movement_patterns.extend([

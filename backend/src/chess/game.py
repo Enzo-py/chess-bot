@@ -77,11 +77,10 @@ class Game:
             raise Exception("Invalid position", end)
         
         start_coords = self.board.get_coords(start)
-        self._update_state(piece, start_coords, start, end_coords)
-
         self.board.move(start, end)
 
-        self.board.check_for_draw(Player.WHITE if self.current_player == Player.BLACK else Player.BLACK, self.nb_half_moves)
+        self._update_state(piece, start_coords, start, end_coords)
+        self.board.check_for_draw(self.current_player, self.nb_half_moves)
 
     def play_algo_move(self):
         """
@@ -96,7 +95,7 @@ class Game:
         
         if action is None: # surrender
             self.board.checkmate = self.current_player
-
+            return
         
         self.move(action["from"], action["to"])
 
@@ -105,8 +104,21 @@ class Game:
 
         if self.ia_move_handler is not None: self.ia_move_handler(action)
         return action
-            
+    
+    def get_score(self, color):
+        """
+            Return a score, positive if <color> is winning, negative otherwise.
+            The score depends of the material balance.
+        """
 
+        score = 0
+        for piece in self.board.white_pieces:
+            score += piece.value
+        for piece in self.board.black_pieces:
+            score -= piece.value
+
+        return score if color == Player.WHITE else -score
+            
     def _update_state(self, piece, start_coords, start, end):
         """
         Update the global game state after a move.

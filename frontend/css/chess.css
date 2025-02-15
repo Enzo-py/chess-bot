@@ -11,7 +11,7 @@ main {
 
 .board-container #board rect.highlight {
     stroke-width: 4px;
-    stroke: var(--accent-color);
+    stroke: #fff;
 }
 
 .board-container #board rect.moved[color="white"] { 

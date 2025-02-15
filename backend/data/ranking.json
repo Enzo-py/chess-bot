@@ -10,5 +10,11 @@
         "type": "AI",
         "elo": 600,
         "games": []
+    },
+    {
+        "model": "Greedy AI",
+        "type": "AI",
+        "elo": 600,
+        "games": []
     }
 ]

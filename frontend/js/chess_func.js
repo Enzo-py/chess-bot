@@ -6,7 +6,7 @@ const game_state = {
     castling: {'K': true, 'Q': true, 'k': true, 'q': true},
     king_in_check: false,
     checkmate: null,
-    draw: false,
+    draw: null,
     white_player: null,
     black_player: null
 }
@@ -265,7 +265,7 @@ function draw_possible_moves(piece) {
 }
 
 async function move_piece(moves, event, piece, no_confirmation = false, promote = undefined) {
-    if (game_state.draw !== null || game_state.checkmate != null) return;
+    if (game_state.draw !== null) return
 
     if (no_confirmation) {
         nearest_square = event
