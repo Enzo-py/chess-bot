@@ -4,6 +4,7 @@ except ImportError: from player import Player
 import chess
 
 class Game:
+    BB_EDGE = chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_FILE_A | chess.BB_FILE_H
 
     PIECE_VALUES = {
         chess.PAWN: 1,
@@ -56,7 +57,7 @@ class Game:
         elif self.board.is_fivefold_repetition():
             self.draw = "fivefold repetition"
         elif self.board.is_checkmate():
-            self.checkmate = self.board.turn
+            self.checkmate = chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK
         elif self.board.is_check():
             self.king_in_check[self.board.turn] = True
         else:

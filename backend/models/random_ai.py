@@ -1,4 +1,4 @@
-from .engine import Engine, Piece
+from .engine import Engine
 
 import random
 

@@ -1,5 +1,4 @@
 from src.chess.game import Game
-from src.chess.piece import Piece
 from src.chess.player import Player
 
 class Engine(Player):

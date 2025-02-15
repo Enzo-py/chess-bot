@@ -1,146 +1,189 @@
-from .engine import Engine, Piece
-
+from .engine import Engine
 import chess
 import numpy as np
 
 class GreedyAI(Engine):
     """
-    Greedy AI that try to maximize gain.
+    Optimized Greedy AI that plays as strongly as possible with a single-move evaluation.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_move_piece = None
+        self.last_last_move_piece = None
 
-    def play(self) -> dict:
+    def play(self) -> chess.Move:
         """
-        Return the move played by the AI.
-        
-        :return: {"from": (int, int), "to": (int, int), ["promotion": str]}
-        :rtype: dict
+        Select the best move based on a greedy evaluation function.
         """
+        all_moves = list(self.game.board.legal_moves)
+        if not all_moves:
+            return None  # No legal moves (stalemate or checkmate)
 
-        all_moves: list[chess.Move] = list(self.game.board.legal_moves)
-        all_proba = []
-        for move in all_moves:
-            all_proba.append(self.get_action_score(move))
-        
-        # to avoid having a probability of 0 or negative (-> sum of probabilities = 0)
-        if len(all_proba) == 0: return None
+        best_move = max(all_moves, key=self.get_action_score)
+        self.last_last_move_piece = self.last_move_piece
+        self.last_move_piece = self.game.get_piece(best_move.from_square).piece_type
+        return best_move
 
-        choice_idx = np.argmax(all_proba)
-        choice = all_moves[choice_idx]
-        self.last_move_piece = self.game.get_piece(choice.from_square).piece_type
-        return choice
-
-            
-    def get_action_score(self, move: chess.Move) -> int:
+    def get_action_score(self, move: chess.Move) -> float:
         """
-        Get the score of an action.
-        
-        :param action: action to evaluate
-        :type action: dict
-        :return: score of the action
-        :rtype: int
+        Evaluates a move using an optimized greedy function.
         """
-        _from = self.game.get_coords(move.from_square)
-        _to = self.game.get_coords(move.to_square)
-        _from_idx = self.game.get_box_idx(_from)
-        _to_idx = self.game.get_box_idx(_to)
-
-        end_piece = self.game.get_piece(_to)
-        end_piece = end_piece.piece_type if end_piece is not None else None
+        board = self.game.board
         value = 0
 
-        ennemy_attackers = len(self.game.board.attackers(chess.WHITE if self.color == chess.BLACK else chess.BLACK, _to_idx))
-        from_piece = self.game.get_piece(_from).piece_type
+        from_square = move.from_square
+        to_square = move.to_square
+        from_piece = self.game.get_piece(from_square)
+        captured_piece = self.game.get_piece(to_square)
 
-        # Score on the piece taken
-        if end_piece is not None:
-            value += (self.game.PIECE_VALUES[end_piece]+ 3) ** 2
+        _from_coords = self.game.get_coords(from_square)
+        _to_coords = self.game.get_coords(to_square)
 
-        # Avoid moving the same piece twice
-        if self.last_move_piece == from_piece:
+        if not from_piece:
+            return -1000  # Invalid move (should never happen)
+
+        piece_type = from_piece.piece_type
+        color = from_piece.color
+
+        # Piece value bonus (scaled dynamically based on game phase)
+        piece_value = self.game.PIECE_VALUES[piece_type]
+        value += piece_value
+
+        # Capture evaluation (favor good trades)
+        if captured_piece:
+            value += self.game.PIECE_VALUES[captured_piece.piece_type] * 8
+
+        # Avoid moving the same piece twice in a row (unless it's a strong move)
+        if self.last_move_piece == piece_type:
+            value -= 20
+        
+        if self.last_last_move_piece == piece_type:
             value -= 10
 
-        # Score on the piece moved (encourage development, and large moves)
-        if from_piece == chess.PAWN:
-            value += 1 + (_from[1] in [0, 7]) * 3 + (abs(_to[1] - _from[1]) == 2) * 3 + (end_piece is not None) * 3
-        elif from_piece == chess.KNIGHT:
-            value += 2.5
-            # avoid moving the knight on the edge
-            if _to[0] in [0, 7] or _to[1] in [0, 7]:
-                value -= 6
-            if _from[0] in [0, 7] or _from[1] in [0, 7]:
+        # **Piece Development - Force pieces to move from initial position**
+        initial_ranks = {chess.WHITE: 1, chess.BLACK: 6}
+        if chess.square_rank(from_square) == initial_ranks[color]:
+            value += 5  # Encourage moving pieces out of the back rank
+
+        # **Positional Bonuses**
+        # Encourage castling
+        if piece_type == chess.KING and abs(chess.square_file(from_square) - chess.square_file(to_square)) == 2:
+            value += 15  # Castling is very important
+
+        # Encourage center control
+        if to_square in chess.SquareSet(chess.BB_CENTER):
+            value += 5
+
+        # Avoid retreating (unless necessary)
+        if from_square in chess.SquareSet(chess.BB_CENTER) and to_square not in chess.SquareSet(chess.BB_CENTER):
+            value -= 5
+
+        # encourage moving pieces away from the edges
+        if to_square in chess.SquareSet(self.game.BB_EDGE) or from_square in chess.SquareSet(self.game.BB_EDGE):
+            value -= 5
+
+        # **Piece-Specific Bonuses**
+        if piece_type == chess.PAWN:
+            value += 1 + (to_square in chess.SquareSet(chess.BB_RANK_8 | chess.BB_RANK_1)) * 5  # Encourage promotion
+            if chess.square_rank(to_square) >= 6:  # Encourage advancing pawns
+                value += 3
+            # encourage moving * 2 pawns
+            if abs(chess.square_rank(from_square) - chess.square_rank(to_square)) == 2:
                 value += 1
-        elif from_piece == chess.BISHOP:
-            value += 3 + (abs(_to[0] - _from[0]) + abs(_to[1] - _from[1])) / 3
-            # avoid to be in the bottom or top middle
-            if _to[0] in [2, 3, 4, 5] and _to[1] in [0, 7]:
-                value -= 5
-            
-            # encourage moving from ...
-            if _from[0] in [2, 3, 4, 5] and _from[1] in [0, 7]:
-                value += 2
 
-        elif from_piece == chess.ROOK:
-            value += 0 + (abs(_to[0] - _from[0]) + abs(_to[1] - _from[1])) / 2
+        elif piece_type == chess.KNIGHT:
+            value += 3
+            if to_square in chess.SquareSet(self.game.BB_EDGE):
+                value -= 6  # Knights are weak on edges
+            if from_square in chess.SquareSet(self.game.BB_EDGE):
+                value += 3
+        elif piece_type == chess.BISHOP:
+            value += 3 + (len(list(board.attacks(to_square))) / 3)
+            # encourage long moves
+            value += (abs(_from_coords[0] - _to_coords[0]) + abs(_from_coords[1] - _to_coords[1])) / 4.5
 
+            # avoid bishops on middle bottom
+            if to_square in chess.SquareSet(chess.BB_RANK_1) and chess.square_file(to_square) in [2, 3, 4, 5]:
+                value -= 10
 
-        elif from_piece == chess.QUEEN:
-            value += 1.5
-        elif from_piece == chess.KING:
-            if abs(_to[0] - _from[0]) == 2:
-                value += 6
+        elif piece_type == chess.ROOK:
+            value += 1
+            # encourage long moves
+            value += (abs(_from_coords[0] - _to_coords[0]) + abs(_from_coords[1] - _to_coords[1])) / 3.5
+
+            # don't move if we still can castle
+            if color == chess.WHITE:
+                if from_square == chess.A1 and board.has_kingside_castling_rights(chess.WHITE):
+                    value -= 20
+                if from_square == chess.H1 and board.has_queenside_castling_rights(chess.WHITE):
+                    value -= 20
             else:
-                value -= 40 # avoid moving the king
+                if from_square == chess.A8 and board.has_kingside_castling_rights(chess.BLACK):
+                    value -= 20
+                if from_square == chess.H8 and board.has_queenside_castling_rights(chess.BLACK):
+                    value -= 20
 
-        # Score on the promotion
-        if move.promotion is not None:
-            value += (self.game.PIECE_VALUES[move.promotion] - 1) * 2
 
-        # Avoid to move on an uncontrolled square
-        value += (len(self.game.board.attackers(self.color, _to_idx)) - ennemy_attackers) * 2
+        elif piece_type == chess.QUEEN:
+            # Stronger early-game penalty
+            if board.fullmove_number < 15:  
+                value -= 20  # Really discourage early queen moves
+            
+            # Encourage developing other pieces first
+            undeveloped_pieces = sum(1 for sq in chess.SquareSet(chess.BB_RANK_1 if color == chess.WHITE else chess.BB_RANK_8)
+                                    if board.piece_at(sq) and board.piece_at(sq).color == color)
+            value -= undeveloped_pieces * 3  # The less developed pieces, the harsher the penalty
 
-        # ennemy king possible moves:
-        ennemy_king_box_idx = self.game.find_piece_box(chess.KING, chess.WHITE if self.color == chess.BLACK else chess.BLACK)
-        ennemy_king_moves = self.game.get_possible_moves(ennemy_king_box_idx)
+        elif piece_type == chess.KING:
+            value -= 50  # Avoid moving the king unless necessary
 
-        # simulate the move
-        self.game.board.push(move)
+        # **Promotion Bonus**
+        if move.promotion:
+            value += (self.game.PIECE_VALUES[move.promotion] - 1) * 3
 
-        # get the new possible moves
-        ennemy_king_box_idx = self.game.find_piece_box(chess.KING, chess.WHITE if self.color == chess.BLACK else chess.BLACK)
-        ennemy_king_moves_after = self.game.get_possible_moves(ennemy_king_box_idx)
-        is_check = self.game.king_in_check[chess.WHITE if self.color == chess.BLACK else chess.BLACK]
+        # **Tactical Awareness**
+        attackers = len(board.attackers(not color, to_square)) + 1
+        defenders = len(board.attackers(color, to_square))
 
-        # Avoid to move on an uncontrolled square after the move
-        value += 4 * (len(self.game.board.attackers(self.color, _to_idx)) - len(self.game.board.attackers(chess.WHITE if self.color == chess.BLACK else chess.BLACK, _to_idx)) - 1)
-        
-        self.game.board.pop() # cancel the move
+        if attackers > 1:
+            value -= self.game.PIECE_VALUES[piece_type] * 8 # trade cost
 
-        # if we are loosing the piece if we stay, move
-        if len(self.game.board.attackers(self.color, _from_idx)) < len(self.game.board.attackers(chess.WHITE if self.color == chess.BLACK else chess.BLACK, _from_idx)):
-            value += self.game.PIECE_VALUES[from_piece] * 2
-        
-        # avoid to let the ennemy take a high value piece
-        if ennemy_attackers > 0:
-            value -= self.game.PIECE_VALUES[from_piece] * 5
-        
-        # try to diminue king mobility
-        value += (len(ennemy_king_moves) - len(ennemy_king_moves_after)) * 2
+        attackers_from = len(board.attackers(not color, from_square)) + 1
 
-        # check for mate or draw
-        if not is_check and len(ennemy_king_moves_after) == 0 and self.game.get_score(self.color) > 6:
-            value = -200 # draw when we are winning
-        elif not is_check and len(ennemy_king_moves_after) == 0 and self.game.get_score(self.color) < 1:
-            value += 200 # mate when we are loosing
-        elif is_check and len(ennemy_king_moves_after) == 0 and ennemy_attackers == 0:
-            value = 1e6
+        if attackers > defenders:
+            value -= self.game.PIECE_VALUES[piece_type] * 5  # Avoid hanging pieces
 
-        value += int(is_check)
-        # increase the value if the move is a check or reduce king move and piece is rook or queen
-        if (is_check or len(ennemy_king_moves_after) - len(ennemy_king_moves) < 0) and from_piece in [chess.ROOK, chess.QUEEN]:
-            value += 10
+        if attackers_from > 0:
+            value += self.game.PIECE_VALUES[piece_type] * 5  # Avoid undefended pieces
+
+        # Simulate move
+        board.push(move)
+
+        # **Checkmate & Stalemate Detection**
+        enemy_king_square = board.king(not color)
+        enemy_king_moves_before = [m for m in board.legal_moves if m.from_square == enemy_king_square]
+        is_check = board.is_check()
+        is_checkmate = board.is_checkmate()
+        is_stalemate = board.is_stalemate()
+
+        if is_checkmate:
+            value = 1e6  # Winning move (checkmate)
+        elif is_stalemate:
+            value -= 1e6  # Avoid stalemate unless losing
+
+        # **Check Bonus**
+        if is_check:
+            value += 3  # Encourage checks
+
+        # **Reduce Enemy King Mobility** (Restored from your code)
+        enemy_king_square = board.king(not color)
+        enemy_king_moves_after = [m for m in board.legal_moves if m.from_square == enemy_king_square]
+        king_mobility_reduction = len(enemy_king_moves_before) - len(enemy_king_moves_after)
+        value += king_mobility_reduction * 5  # More reduction = better move
+        if is_check:
+            value += king_mobility_reduction  # Bonus if check also reduces mobility
+
+        board.pop()  # Undo move simulation
 
         return value

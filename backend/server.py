@@ -156,7 +156,12 @@ class Server:
         """
         _from = chess.square_name(move.from_square).upper()
         _to = chess.square_name(move.to_square).upper()
-        promote = move.promotion.uci() if move.promotion is not None else None
+        if move.promotion is not None:
+            promote = chess.piece_symbol(move.promotion)
+            # upper if white, lower if black (reverse in the if because the turn is already changed)
+            promote = promote.upper() if self.focused_game.board.turn == chess.BLACK else promote.lower()
+        else:
+            promote = None
 
         ctn = {
             "FEN": self.focused_game.fen(),
