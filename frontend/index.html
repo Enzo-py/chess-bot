@@ -24,11 +24,44 @@
     </header>
 
     <main>
-        <div class="black-player"></div>
-        <div class="board-container">
-            <!-- chess board -->
+        <div class="left-panel">
+
         </div>
-        <div class="white-player"></div>
+
+        <div class="main-panel">
+            <div class="black-player"></div>
+            <div class="board-container">
+                <!-- chess board -->
+            </div>
+            <div class="white-player"></div>
+        </div>
+
+        <div class="right-panel">
+            <div class="game-info">
+                <div class="possible-castling">
+                    <span class="title">Possible castling</span>
+                    <div class="castling-block">
+                        <div class="castling-white">
+                            <span class="title">White:</span>
+                            <div class="castling-moves"></div>
+                        </div>
+                        <div class="castling-black">
+                            <span class="title">Black:</span>
+                            <div class="castling-moves"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="possible-en-passant">
+                    <span>Possible en passant:</span>
+                    <span class="en-passant"></span>
+                </div>
+            </div>
+
+            <div class="game-history">
+                <span class="title">Game history</span>
+                <div class="history"></div>
+            </div>
+        </div>
     </main>
 
     <script>

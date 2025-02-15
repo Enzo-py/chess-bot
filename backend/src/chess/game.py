@@ -1,140 +1,191 @@
-from .board import Board
-from .player import Player
+try: from .player import Player
+except ImportError: from player import Player
+
+import chess
 
 class Game:
 
-    def __init__(self):
-        self.board = Board()
-        self.current_player = Player.WHITE
-        self.player_white = Player(Player.WHITE)
-        self.player_black = Player(Player.BLACK)
+    PIECE_VALUES = {
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+        chess.KING: 10 # not really important
+    }
 
-        self.nb_moves = 0
-        self.nb_half_moves = 0
-        """Nb moves since last capture or pawn move: used to detect draw"""
+    def __init__(self):
+
+        self.board = None
 
         # Players (can be AI or human)
         self.white = None
         self.black = None
 
         self.ia_move_handler = None
+        self.draw = None
+        self.checkmate = None
+        self.king_in_check = {chess.WHITE: False, chess.BLACK: False}
 
-    def to_FEN(self):
-        left_part = self.board.to_FEN()
-        right_part = f"{'w' if self.current_player == Player.WHITE else 'b'}"
-        white_castling = " "
-        black_castling = " "
-        if self.board.available_castling[Player.WHITE]["king"]:
-            white_castling += "K"
-        if self.board.available_castling[Player.WHITE]["queen"]:
-            white_castling += "Q"
-        if self.board.available_castling[Player.BLACK]["king"]:
-            black_castling += "k"
-        if self.board.available_castling[Player.BLACK]["queen"]:
-            black_castling += "q"
-        right_part += white_castling if white_castling else " -"
-        right_part += black_castling if black_castling else " -"
-        right_part += f" {self.board.get_box(self.board.en_passant) if self.board.en_passant is not None else '-'}"
-        right_part += f" {self.nb_half_moves} {self.nb_moves}"
-        return f"{left_part} {right_part}"
+    def __str__(self):
+        return self.board.__str__()
     
-    def from_FEN(self, fen):
-        left_part = fen.split(" ")[0]
-        right_part = fen.split(" ")[1:]
+    def __repr__(self):
+        return self.board.__repr__()
 
-        self.board.from_FEN(left_part)
-        self.current_player = Player.WHITE if right_part[0] == "w" else Player.BLACK
-        self.board.available_castling = {
-            Player.WHITE: {"king": False, "queen": False},
-            Player.BLACK: {"king": False, "queen": False}
-        }
-        if "K" in right_part:
-            self.board.available_castling[Player.WHITE]["king"] = True
-        if "Q" in right_part:
-            self.board.available_castling[Player.WHITE]["queen"] = True
-        if "k" in right_part:
-            self.board.available_castling[Player.BLACK]["king"] = True
-        if "q" in right_part:
-            self.board.available_castling[Player.BLACK]["queen"] = True
+    def fen(self):
+        return self.board.fen()
+       
+    def load_fen(self, fen):
+        self.board = chess.Board(fen)
+    
+    def move(self, move: chess.Move):
+        # check if the move is legal
+        if move not in self.board.legal_moves:
+            raise Exception("Illegal move: " + str(move))
         
-        self.board.en_passant = self.board.get_coords(right_part[3]) if right_part[3] != "-" else None
-        self.nb_half_moves = int(right_part[4])
-        self.nb_moves = int(right_part[5])
+        self.board.push(move)
 
-    def move(self, start, end):
-        if self.board.checkmate or self.board.draw is not None:
-            raise Exception("Game is over")
-        
-        piece = self.board.get(start)
-        if piece is None:
-            raise Exception("No piece at position", start)
+        # check for draw
+        if self.board.is_stalemate():
+            self.draw = "stalemate"
+        elif self.board.is_insufficient_material():
+            self.draw = "insufficient material"
+        elif self.board.is_seventyfive_moves():
+            self.draw = "seventyfive moves"
+        elif self.board.is_fivefold_repetition():
+            self.draw = "fivefold repetition"
+        elif self.board.is_checkmate():
+            self.checkmate = self.board.turn
+        elif self.board.is_check():
+            self.king_in_check[self.board.turn] = True
+        else:
+            self.king_in_check[self.board.turn] = False
+        self.king_in_check[chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK] = False
 
-        if piece.color != self.current_player:
-            raise Exception("Not your turn")
-
-        end_coords = self.board.get_coords(end)
-        if not self.board.is_valid_position(end_coords):
-            raise Exception("Invalid position", end)
-        
-        start_coords = self.board.get_coords(start)
-        self.board.move(start, end)
-
-        self._update_state(piece, start_coords, start, end_coords)
-        self.board.check_for_draw(self.current_player, self.nb_half_moves)
-
-    def play_algo_move(self):
+    def play_engine_move(self):
         """
         Get the move from the AI.
         """
-        if self.board.checkmate or self.board.draw is not None: return
-        if self.current_player == Player.WHITE and issubclass(type(self.white), Player):
-            action = self.white.play(list(self.board.white_pieces))
-        elif self.current_player == Player.BLACK and issubclass(type(self.black), Player):
-            action = self.black.play(list(self.board.black_pieces))
+        if self.checkmate is not None or self.draw is not None: return
+
+        if self.board.turn == chess.WHITE and self.white.is_engine:
+            move = self.white.play()
+        elif self.board.turn == chess.BLACK and self.black.is_engine:
+            move = self.black.play()
         else: return
         
-        if action is None: # surrender
-            self.board.checkmate = self.current_player
+        if move is None: # surrender
+            self.checkmate = self.current_player
             return
         
-        self.move(action["from"], action["to"])
+        self.move(move)
 
-        if "promote" in action:
-            self.board.promote(action["to"], action["promote"])
-
-        if self.ia_move_handler is not None: self.ia_move_handler(action)
-        return action
+        if self.ia_move_handler is not None: self.ia_move_handler(move)
     
     def get_score(self, color):
         """
             Return a score, positive if <color> is winning, negative otherwise.
             The score depends of the material balance.
         """
-
+        opposite_color = chess.WHITE if color == chess.BLACK else chess.BLACK
         score = 0
-        for piece in self.board.white_pieces:
-            score += piece.value
-        for piece in self.board.black_pieces:
-            score -= piece.value
+        for piece_type, value in self.PIECE_VALUES.items():
+            score += value * len(self.board.pieces(piece_type, color))
+            score -= value * len(self.board.pieces(piece_type, opposite_color))
 
-        return score if color == Player.WHITE else -score
-            
-    def _update_state(self, piece, start_coords, start, end):
+        return score if color == chess.WHITE else -score
+    
+    def get_box_idx(self, *args) -> chess.Piece:
         """
-        Update the global game state after a move.
-            - Update the number of moves
-            - Update the number of half moves
-            - Update the castling rights
-            - Update the en passant square
+        Get a piece from the board.
         """
-        self.nb_moves += 1
-        self.current_player = Player.WHITE if self.current_player == Player.BLACK else Player.BLACK
-        if piece.name == "P" or self.board.get(end) is not None:
-            self.nb_half_moves = 0
+
+        # we want to transform args into a string like "a1"
+
+        if len(args) == 1:
+            coords = args[0]
+            if type(coords) is int: # already a box index
+                return coords
         else:
-            self.nb_half_moves += 1
+            coords = (args[0], args[1])
 
-    def play(self, white, black):
+        if type(coords) == tuple:
+            x, y = coords
+            if type(x) == int:
+                x = chr(x + 65)
+                y += 1
+            coords = x + str(y)
+
+        box_idx = chess.parse_square(coords.lower())
+        return box_idx
+    
+    def get_coords(self, *args) -> tuple:
+        """
+        Get the coordinates of a box.
+        
+        :param args: info of the box
+        :type args: tuple or str
+        :return: coordinates
+        :rtype: tuple (int, int)
+        """
+
+        if len(args) == 1:
+            coords = args[0]
+            if type(coords) is tuple: return coords
+            if type(coords) is int:
+                x = coords % 8
+                y = coords // 8
+                return (x, y)
+        else:
+            coords = (args[0], args[1])
+
+        if type(coords) == str:
+            x, y = coords[0], int(coords[1])
+            x = ord(x) - 65
+            y -= 1
+            coords = (x, y)
+        return coords
+
+    def get_piece(self, *args) -> chess.Piece:
+        """
+        Get a piece from the board using coordinates.
+
+        :param args: coordinates of the piece
+        :type args: tuple or str
+        :return: the piece
+        :rtype: chess.Piece
+        """
+        if self.board is None: raise Exception("No board loaded")
+
+        coords = self.get_box_idx(*args)
+        return self.board.piece_at(coords)
+    
+    def find_piece_box(self, piece_to_find: chess.Piece, color, _exception=True) -> int:
+        """
+        Find the box of a piece.
+        """
+        for square, piece in self.board.piece_map().items():
+            if piece.piece_type == piece_to_find and piece.color == color:
+                return square
+        if _exception: raise Exception("Piece not found")
+        return None
+    
+    def get_possible_moves(self, *args) -> list:
+        """
+        Get the possible moves of a piece knowing its coordinates.
+
+        :param args: coordinates of the piece
+        :type args: tuple or str
+        :return: list of possible moves
+        :rtype list[chess.Move]
+        """
+        if self.board is None: raise Exception("No board loaded")
+
+        coords = self.get_box_idx(*args)
+        return [move for move in self.board.legal_moves if move.from_square == coords]
+
+    def play(self, white, black, fen=None):
         """
         Play a game between two players.
         """
@@ -143,26 +194,39 @@ class Game:
         self.black = black
 
         if issubclass(type(white), Player):
-            white.color = Player.WHITE
+            white.color = chess.WHITE
             white.game = self
         if issubclass(type(black), Player):
-            black.color = Player.BLACK
+            black.color = chess.BLACK
             black.game = self
+
+        if fen is not None:
+            self.load_fen(fen)
+        else:
+            self.board = chess.Board()
 
 
 if __name__ == "__main__":
     game = Game()
-    print(game.board.get('A', 1), "==", game.board.get('A1'))
-    print(game.board)
+    game.play(white=Player(False), black=Player(False))
+    print(game.get_piece('A', 1), "==", game.get_piece('A1'))
+    print(game)
 
-    print(game.board.get('A2').get_possible_moves(game.board))
-    print(game.board.get('A7').get_possible_captures(game.board))
+    moves = game.get_possible_moves('a2')
+    print("all moves of A2:", moves)
+    print("captures:", [game.board.san(move) for move in moves if game.board.is_capture(move)])
+    print("checks:", [game.board.san(move) for move in moves if game.board.gives_check(move)])
 
-    game.move('a7', 'a5')
-    game.move('a2', 'a3')
-    game.move('a5', 'a4')
-    game.move('b2', 'b4')
-    print(game.board)
-    print(game.board.get('a4').get_possible_captures(game.board))
-    print(game.to_FEN())
+    game.move(chess.Move.from_uci('d2d4'))
+    game.move(chess.Move.from_uci('d7d6'))
+    game.move(chess.Move.from_uci('d4d5'))
+    game.move(chess.Move.from_uci('c7c5'))
+
+    moves = game.get_possible_moves("D5")
+    print(game)
+
+    print("all moves of D5:", moves)
+    print("captures:", [game.board.san(move) for move in moves if game.board.is_capture(move)])
+    # print(game.get('a4').get_possible_captures(game.board))
+    # print(game.fen())
 

@@ -17,16 +17,16 @@ var saved_possible_moves = {
 
 function update_game_state(full_fen) {
     // ex: rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQ kq (3, 2) 0 1
-    let [fen, turn, castling_w, castling_b, en_passant, halfmove_clock, fullmove_number] = full_fen.split(" ");
+    let [fen, turn, castling, en_passant, halfmove_clock, fullmove_number] = full_fen.split(" ");
     game_state.turn = turn;
     game_state.en_passant = en_passant;
     game_state.halfmove_clock = halfmove_clock;
     game_state.fullmove_number = fullmove_number;
     game_state.castling = {
-        'K': castling_w.includes("K"),
-        'Q': castling_w.includes("Q"),
-        'k': castling_b.includes("k"),
-        'q': castling_b.includes("q")
+        'K': castling.includes("K"),
+        'Q': castling.includes("Q"),
+        'k': castling.includes("k"),
+        'q': castling.includes("q")
     }
 
     console.log(game_state)

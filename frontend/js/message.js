@@ -51,6 +51,7 @@ function read_confirm_move(data) {
     game_state.draw = data.draw;
     if (game_state.draw) stalemate();
     update_game_state(data.FEN);
+    update_right_panel()
 }
 
 function read_ai_move(data) {
@@ -66,5 +67,17 @@ function read_ai_move(data) {
     promote = data.promote === undefined || data.promote === null ? undefined : (game_state.turn === "w" ? data.promote.toLowerCase() : data.promote.toUpperCase());
     let rect = d3.select(`svg#board #board-boxes #${data.to}`);
     move_piece(null, rect, piece, true, promote);
+
+    update_right_panel()
+}
+
+function update_right_panel() {
+    right_panel = d3.select(".right-panel")
+    white_castling = right_panel.select(".possible-castling .castling-block .castling-white > div")
+    white_castling.text((game_state.castling["K"] ? "K " : "") + (game_state.castling["Q"] ? "Q" : ""))
+    black_castling = right_panel.select(".possible-castling .castling-block .castling-black > div")
+    black_castling.text((game_state.castling["k"] ? "k " : "") + (game_state.castling["q"] ? "q" : ""))
+
+    right_panel.select(".possible-en-passant .en-passant").text(game_state.en_passant === null ? "-" : game_state.en_passant)
 }
 

@@ -10,6 +10,7 @@ from src.chess.player import Player
 
 import asyncio
 import json
+import chess
 
 class Server:
     """
@@ -72,15 +73,15 @@ class Server:
         self.focused_game = Game()
         if info["game_mode"] == "PvP":
             if info["player_color"] == "w":
-                self.focused_game.play(white=info["player1"], black=info["player2"])
+                self.focused_game.play(white=Player(info["player1"]), black=Player(info["player2"]))
             else:
-                self.focused_game.play(white=info["player2"], black=info["player1"])
+                self.focused_game.play(white=Player(info["player2"]), black=Player(info["player1"]))
         elif info["game_mode"] == "PvAI":
             ai = AVAILABLE_MODELS[info["ai_selection"]]()
             if info["player_color"] == "w":
-                self.focused_game.play(white=info["player"], black=ai)
+                self.focused_game.play(white=Player(info["player"]), black=ai)
             else:
-                self.focused_game.play(white=ai, black=info["player"])
+                self.focused_game.play(white=ai, black=Player(info["player"]))
 
         elif info["game_mode"] == "AIvAI":
             ai1 = AVAILABLE_MODELS[info["ai1_selection"]]()
@@ -92,14 +93,14 @@ class Server:
 
         self.focused_game.ia_move_handler = self.ia_move_handler
         ctn = {
-            "FEN": self.focused_game.to_FEN(),
-            "current_player": self.focused_game.current_player
+            "FEN": self.focused_game.fen(),
+            "current_player": self.focused_game.board.turn
         }
         asyncio.create_task(self.server.broadcast(protocol.Message("game-started", ctn).to_json()))
 
         # wait 1s before playing the first move
         await asyncio.sleep(0.8)
-        self.focused_game.play_algo_move()
+        self.focused_game.play_engine_move()
 
     def get_possible_moves(self, info):
         """
@@ -109,21 +110,18 @@ class Server:
             asyncio.create_task(self.server.broadcast(protocol.Message("error", "No game started").to_json()))
             return
         
-        piece = self.focused_game.board.get(info["pos"], _exception=False)
+        piece = self.focused_game.get_piece(info["pos"])
         if piece is None:
             asyncio.create_task(self.server.broadcast(protocol.Message("error", "No piece at position").to_json()))
             return
         
-        if piece.fen() != info["fen"]:
+        if str(piece) != info["fen"]:
             asyncio.create_task(self.server.broadcast(protocol.Message("error", f"Invalid piece at position; find: {piece.fen()}, should be {info['fen']}").to_json()))
             return
         
-        moves = piece.get_possible_moves(self.focused_game.board)
-        moves += piece.get_possible_captures(self.focused_game.board)
-        moves = list(set(moves))
-
-        # transform coordinates to box names
-        moves = [self.focused_game.board.get_box(m).upper() for m in moves]
+        moves = self.focused_game.get_possible_moves(info["pos"])
+        # transform coordinates to end box names
+        moves = [chess.square_name(move.to_square).upper() for move in moves]
         asyncio.create_task(self.server.broadcast(protocol.Message("possible-moves", {'moves': moves}).to_json()))
 
     def move_piece(self, info):
@@ -135,46 +133,45 @@ class Server:
             return
         
         try:
-            self.focused_game.move(info["start"], info["end"])
+            move = chess.Move.from_uci(info["start"].lower() + info["end"].lower() + (info.get("promote", "") or "").lower())
+            self.focused_game.move(move)
         except Exception as e:
             asyncio.create_task(self.server.broadcast(protocol.Message("error", str(e)).to_json()))
             traceback.print_exc()
-
-            # reset turn
-            self.focused_game.current_player = Player.WHITE if self.focused_game.current_player == Player.BLACK else Player.BLACK
             return
-        
-        if info["promote"] is not None:
-            self.focused_game.board.promote(info["end"], info["promote"])
 
         ctn = {
-            "FEN": self.focused_game.to_FEN(),
-            "king_in_check": self.focused_game.board.king_in_check['w'] or self.focused_game.board.king_in_check['b'],
-            "checkmate": self.focused_game.board.checkmate,
-            "draw": self.focused_game.board.draw,
+            "FEN": self.focused_game.fen(),
+            "king_in_check": self.focused_game.king_in_check[chess.WHITE] or self.focused_game.king_in_check[chess.BLACK],
+            "checkmate": self.focused_game.checkmate,
+            "draw": self.focused_game.draw,
         }
 
         asyncio.create_task(self.server.broadcast(protocol.Message("confirm-move", ctn).to_json()))
-        self.focused_game.play_algo_move()
+        self.focused_game.play_engine_move()
 
-    def ia_move_handler(self, action):
+    def ia_move_handler(self, move: chess.Move):
         """
         Handle the move of the AI.
         """
+        _from = chess.square_name(move.from_square).upper()
+        _to = chess.square_name(move.to_square).upper()
+        promote = move.promotion.uci() if move.promotion is not None else None
+
         ctn = {
-            "FEN": self.focused_game.to_FEN(),
-            "king_in_check": self.focused_game.board.king_in_check['w'] or self.focused_game.board.king_in_check['b'],
-            "checkmate": self.focused_game.board.checkmate,
-            "draw": self.focused_game.board.draw,
-            "from": action["from"].upper(),
-            "to": action["to"].upper(),
-            "promote": action.get("promote")
+            "FEN": self.focused_game.fen(),
+            "king_in_check": self.focused_game.king_in_check[chess.WHITE] or self.focused_game.king_in_check[chess.BLACK],
+            "checkmate": self.focused_game.checkmate,
+            "draw": self.focused_game.draw,
+            "from": _from,
+            "to": _to,
+            "promote": promote
         }
         asyncio.create_task(self.server.broadcast(protocol.Message("ai-move", ctn).to_json()))
         
         async def play():
             await asyncio.sleep(0.8)
-            self.focused_game.play_algo_move()
+            self.focused_game.play_engine_move()
         asyncio.create_task(play())
 
     def get_players_list(self):

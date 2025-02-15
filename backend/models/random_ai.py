@@ -1,13 +1,13 @@
-from .algo import Algo, Piece
+from .engine import Engine, Piece
 
 import random
 
-class RandomAI(Algo):
+class RandomAI(Engine):
     """
     Random AI that plays a random move.
     """
 
-    def play(self, pieces: list[Piece]) -> dict:
+    def play(self) -> dict:
         """
         Return the move played by the AI.
         
@@ -17,9 +17,7 @@ class RandomAI(Algo):
         :rtype: dict
         """
 
-        random.shuffle(pieces)
-        for piece in pieces:
-            actions = piece.get_possible_actions(self.game.board)
-            if actions:
-                return random.choice(actions)
+        actions = list(self.game.board.legal_moves)
+        if len(actions) == 0: return None
+        return random.choice(actions)
         

@@ -446,7 +446,7 @@ class Board:
         """
         return list(self.white_pieces if color == Player.WHITE else self.black_pieces)              
 
-    def to_FEN(self):
+    def fen(self):
         """
         Convert the board to FEN format.
         """
