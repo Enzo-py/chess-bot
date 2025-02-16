@@ -187,7 +187,7 @@ class Server:
         """
         Get all registered players and AI.
         """
-        ranking = json.load(open("backend/data/ranking.json", "r"))
+        ranking = json.load(open(ranking_path, "r"))
         
         ais = []
         players = []
