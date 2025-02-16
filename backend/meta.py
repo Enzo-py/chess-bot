@@ -2,12 +2,14 @@ from models.random_ai import RandomAI
 from models.greedy_ai import GreedyAI
 from models.greedy_exploration import GreedyExplorationAI
 from models.stockfish import StockfishAI
+from models.alpha_beta import SunfishAI
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
     "Greedy AI": GreedyAI,
     "GreedyExploration AI": GreedyExplorationAI,
     "Stockfish AI": StockfishAI,
+    "Sunfish AI": SunfishAI,
 }
 """
 This dictionary exposes all the models that are available for testing or using in the interface.

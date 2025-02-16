@@ -1,5 +1,11 @@
 [
     {
+        "model": "Sunfish AI",
+        "type": "AI",
+        "elo": 690,
+        "games": []
+    },
+    {
         "name": "Enzo",
         "type": "player",
         "elo": 600,

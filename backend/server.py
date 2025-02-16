@@ -12,6 +12,8 @@ import asyncio
 import json
 import chess
 
+ranking_path = "backend/data/ranking.json"
+
 class Server:
     """
     Server class that handles the app.
@@ -185,7 +187,7 @@ class Server:
         """
         Get all registered players and AI.
         """
-        ranking = json.load(open("./data/ranking.json", "r"))
+        ranking = json.load(open("backend/data/ranking.json", "r"))
         
         ais = []
         players = []
@@ -203,7 +205,7 @@ class Server:
 
         all_players = players + ais
         all_players = sorted(all_players, key=lambda x: x["elo"], reverse=True)
-        json.dump(all_players, open("./data/ranking.json", "w"), indent=4)
+        json.dump(all_players, open(ranking_path, "w"), indent=4)
 
         ctn = {
             "players": players,
@@ -215,7 +217,7 @@ class Server:
         """
         Create a new player with the given name.
         """
-        ranking = json.load(open("./data/ranking.json", "r"))
+        ranking = json.load(open(ranking_path, "r"))
         if len(info['name']) < 3:
             asyncio.create_task(self.server.broadcast(protocol.Message("error", "Name too short").to_json()))
             return
@@ -230,7 +232,7 @@ class Server:
             "elo": 600,
             "games": []
         })
-        json.dump(ranking, open("./data/ranking.json", "w"), indent=4)
+        json.dump(ranking, open(ranking_path, "w"), indent=4)
         asyncio.create_task(self.server.broadcast(protocol.Message("player-created", "Player created").to_json()))
 
 if __name__ == "__main__":
