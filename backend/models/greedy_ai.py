@@ -12,7 +12,7 @@ class GreedyAI(Engine):
         self.last_move_piece = None
         self.last_last_move_piece = None
 
-    def play(self) -> chess.Move:
+    def play(self, topN=-1) -> chess.Move:
         """
         Select the best move based on a greedy evaluation function.
         """
@@ -20,6 +20,9 @@ class GreedyAI(Engine):
         if not all_moves:
             return None  # No legal moves (stalemate or checkmate)
 
+        if topN > 0:
+            return sorted(all_moves, key=self.get_action_score, reverse=True)[:min(topN, len(all_moves))]
+        
         best_move = max(all_moves, key=self.get_action_score)
         self.last_last_move_piece = self.last_move_piece
         self.last_move_piece = self.game.get_piece(best_move.from_square).piece_type
@@ -80,7 +83,7 @@ class GreedyAI(Engine):
             value -= 5
 
         # encourage moving pieces away from the edges
-        if to_square in chess.SquareSet(self.game.BB_EDGE) or from_square in chess.SquareSet(self.game.BB_EDGE):
+        if to_square in self.game.BB_EDGE or from_square in self.game.BB_EDGE:
             value -= 5
 
         # **Piece-Specific Bonuses**
@@ -94,9 +97,9 @@ class GreedyAI(Engine):
 
         elif piece_type == chess.KNIGHT:
             value += 3
-            if to_square in chess.SquareSet(self.game.BB_EDGE):
+            if to_square in self.game.BB_EDGE:
                 value -= 6  # Knights are weak on edges
-            if from_square in chess.SquareSet(self.game.BB_EDGE):
+            if from_square in self.game.BB_EDGE:
                 value += 3
         elif piece_type == chess.BISHOP:
             value += 3 + (len(list(board.attacks(to_square))) / 3)

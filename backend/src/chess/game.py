@@ -4,7 +4,7 @@ except ImportError: from player import Player
 import chess
 
 class Game:
-    BB_EDGE = chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_FILE_A | chess.BB_FILE_H
+    BB_EDGE = chess.SquareSet(chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_FILE_A | chess.BB_FILE_H)
 
     PIECE_VALUES = {
         chess.PAWN: 1,
@@ -27,6 +27,7 @@ class Game:
         self.draw = None
         self.checkmate = None
         self.king_in_check = {chess.WHITE: False, chess.BLACK: False}
+        self.last_player = chess.BLACK
 
     def __str__(self):
         return self.board.__str__()
@@ -39,6 +40,7 @@ class Game:
        
     def load_fen(self, fen):
         self.board = chess.Board(fen)
+        return self
     
     def move(self, move: chess.Move):
         # check if the move is legal
@@ -57,13 +59,16 @@ class Game:
         elif self.board.is_fivefold_repetition():
             self.draw = "fivefold repetition"
         elif self.board.is_checkmate():
-            self.checkmate = chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK
-        elif self.board.is_check():
-            self.king_in_check[self.board.turn] = True
+            self.checkmate = self.last_player
+        
+        if self.board.is_check():
+            self.king_in_check[self.last_player] = True
         else:
-            self.king_in_check[self.board.turn] = False
-        self.king_in_check[chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK] = False
+            self.king_in_check[self.last_player] = False
+        self.king_in_check[not self.last_player] = False
 
+        self.last_player = chess.WHITE if self.last_player == chess.BLACK else chess.BLACK
+    
     def play_engine_move(self):
         """
         Get the move from the AI.
@@ -77,8 +82,7 @@ class Game:
         else: return
         
         if move is None: # surrender
-            self.checkmate = self.current_player
-            return
+            raise Exception("No legal moves")
         
         self.move(move)
 
@@ -89,13 +93,14 @@ class Game:
             Return a score, positive if <color> is winning, negative otherwise.
             The score depends of the material balance.
         """
-        opposite_color = chess.WHITE if color == chess.BLACK else chess.BLACK
-        score = 0
-        for piece_type, value in self.PIECE_VALUES.items():
-            score += value * len(self.board.pieces(piece_type, color))
-            score -= value * len(self.board.pieces(piece_type, opposite_color))
+        score = sum(
+            self.PIECE_VALUES[piece] * (
+                len(self.board.pieces(piece, color)) - len(self.board.pieces(piece, not color))
+            )
+            for piece in self.PIECE_VALUES
+        )
 
-        return score if color == chess.WHITE else -score
+        return score
     
     def get_box_idx(self, *args) -> chess.Piece:
         """
@@ -206,6 +211,11 @@ class Game:
         else:
             self.board = chess.Board()
 
+        return self
+
+    def is_game_over(self):
+        return self.checkmate is not None or self.draw is not None
+
 
 if __name__ == "__main__":
     game = Game()
@@ -228,6 +238,4 @@ if __name__ == "__main__":
 
     print("all moves of D5:", moves)
     print("captures:", [game.board.san(move) for move in moves if game.board.is_capture(move)])
-    # print(game.get('a4').get_possible_captures(game.board))
-    # print(game.fen())
 

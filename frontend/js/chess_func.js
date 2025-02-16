@@ -47,8 +47,12 @@ async function draw_game(board_fen) {
     // we want to keep the aspect ratio of the board
 
     board_size = board.node().getBoundingClientRect().width;
-    square_size = parseInt((board_size - 30) / 8) - 8;
+    square_size = parseInt((board_size) / 8) - 8;
     board.attr("square-size", square_size);
+    board.attr("width", (square_size + 4) * 8 + 4);
+    board.attr("height", (square_size + 4) * 8 + 4);
+    board.style("width", `${board.attr("width")}px`);
+    board.style("height", `${board.attr("height")}px`);
 
     const columns = "ABCDEFGH";
     const rows = "87654321";
@@ -58,10 +62,10 @@ async function draw_game(board_fen) {
     board_pieces = board.append("g").attr("id", "board-pieces");
     board_labels = board.append("g").attr("id", "board-labels");
 
-    board_boxes.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
-    board_pieces.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
-    board_labels.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
-    possible_move_draw.attr("transform", `translate(30, 0)`).attr("width", board_size).attr("height", board_size);
+    board_boxes.attr("width", board_size).attr("height", board_size);
+    board_pieces.attr("width", board_size).attr("height", board_size);
+    board_labels.attr("width", board_size).attr("height", board_size);
+    possible_move_draw.attr("width", board_size).attr("height", board_size);
 
     // draw squares
     for (let i = 0; i < 8; i++) {
@@ -86,19 +90,23 @@ async function draw_game(board_fen) {
     for (let i = 0; i < 8; i++) {
         // Column letters (bottom)
         board_labels.append("text")
-            .attr("x", i * (square_size + 4) + square_size / 2 + 2)
-            .attr("y", 8 * (square_size + 4) + 15 + 4)
+            .attr("x", i * (square_size + 4) + square_size - 4)
+            .attr("y", 8 * (square_size + 4) - 2)
             .attr("text-anchor", "middle")
             .attr("font-size", "12px")
+            .attr("font-weight", "bolder")
+            .attr("fill", i % 2 == 0 ? "var(--white-box)" : "var(--black-box)")
             .text(columns[i]);
 
         // Row numbers (left side)
         board_labels.append("text")
-            .attr("x", -10)
-            .attr("y", i * (square_size + 4) + square_size / 2 + 2)
+            .attr("x", 14)
+            .attr("y", i * (square_size + 4) + 16)
             .attr("text-anchor", "end")
             .attr("alignment-baseline", "middle")
-            .attr("font-size", "12px")
+            .attr("font-size", "14px")
+            .attr("font-weight", "bolder")
+            .attr("fill", i % 2 == 1 ? "var(--white-box)" : "var(--black-box)")
             .text(rows[i]);
     }
 
@@ -204,10 +212,10 @@ const dragHandler = d3.drag()
         drag_x = event.x - square_size / 2;
         drag_y = event.y - square_size / 2;
 
-        drag_x = Math.max(0, drag_x);
-        drag_x = Math.min(drag_x, 8 * square_size - square_size);
-        drag_y = Math.max(0, drag_y);
-        drag_y = Math.min(drag_y, 8 * square_size - square_size);
+        drag_x = Math.max(-square_size, drag_x);
+        drag_x = Math.min(drag_x, 8 * square_size );
+        drag_y = Math.max(-square_size, drag_y);
+        drag_y = Math.min(drag_y, 8 * square_size);
 
         d3.select(this)
             .attr("transform", `translate(${drag_x}, ${drag_y}) scale(${d3.select(this).attr("initial-scale")})`);
@@ -373,7 +381,9 @@ async function move_piece(moves, event, piece, no_confirmation = false, promote 
             new Audio("../media/capture.mp3").play()
 
     } else {
-        if (killed_pawn !== null && !killed_pawn.empty()) {
+        if (game_state.king_in_check)
+            new Audio("../media/move-check.mp3").play();
+        else if (killed_pawn !== null && !killed_pawn.empty()) {
             // remove killed pawn
             killed_pawn.remove();
             if (game_state.king_in_check)
@@ -391,8 +401,6 @@ async function move_piece(moves, event, piece, no_confirmation = false, promote 
             rook.attr("initial-pos", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")})`);
             new Audio("../media/castle.mp3").play();
         }
-        else if (game_state.king_in_check)
-            new Audio("../media/move-check.mp3").play();
         else
             new Audio("../media/move.mp3").play()
     }

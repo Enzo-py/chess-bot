@@ -1,12 +1,47 @@
 
 main {
     display: flex;
-    justify-content: center;
+    justify-content: space-between;
 }
 
-.board-container, #board {
-    width: 90svh;
-    height: 90svh;
+main:has( div[game-started="false"]) .right-panel,
+main:has( div[game-started="false"]) .main-panel {
+    display: none;
+}
+
+.left-panel {
+    width: 15vw;
+}
+
+.right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: calc((100vw - 90svh) - 60px - 15vw);
+    margin: 30px;
+}
+
+.main-panel {
+    margin-top: 2svh;
+}
+
+.player-side {
+    height: 4svh;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 10px 0 40px;
+}
+
+.board-container {
+    height: fit-content;
+    width: fit-content;
+}
+
+#board {
+    width: 92svh;
+    height: 92svh;
 }
 
 .board-container #board rect.highlight {

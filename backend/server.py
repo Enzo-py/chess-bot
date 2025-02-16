@@ -143,12 +143,14 @@ class Server:
         ctn = {
             "FEN": self.focused_game.fen(),
             "king_in_check": self.focused_game.king_in_check[chess.WHITE] or self.focused_game.king_in_check[chess.BLACK],
-            "checkmate": self.focused_game.checkmate,
+            "checkmate": "w" if self.focused_game.checkmate == chess.WHITE else "b" if self.focused_game.checkmate == chess.BLACK else None,
             "draw": self.focused_game.draw,
         }
 
         asyncio.create_task(self.server.broadcast(protocol.Message("confirm-move", ctn).to_json()))
-        self.focused_game.play_engine_move()
+        async def play():
+            self.focused_game.play_engine_move()
+        asyncio.create_task(play())
 
     def ia_move_handler(self, move: chess.Move):
         """
@@ -166,7 +168,7 @@ class Server:
         ctn = {
             "FEN": self.focused_game.fen(),
             "king_in_check": self.focused_game.king_in_check[chess.WHITE] or self.focused_game.king_in_check[chess.BLACK],
-            "checkmate": self.focused_game.checkmate,
+            "checkmate": "w" if self.focused_game.checkmate == chess.WHITE else "b" if self.focused_game.checkmate == chess.BLACK else None,
             "draw": self.focused_game.draw,
             "from": _from,
             "to": _to,

@@ -1,10 +1,12 @@
 from models.random_ai import RandomAI
 from models.greedy_ai import GreedyAI
+from models.greedy_exploration import GreedyExplorationAI
 from models.stockfish import StockfishAI
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
     "Greedy AI": GreedyAI,
+    "GreedyExploration AI": GreedyExplorationAI,
     "Stockfish AI": StockfishAI,
 }
 """

@@ -17,23 +17,30 @@
 <body>
     <div id="loading-screen"><div class="spinner"></div><p></p></div>
 
-    <header>
-        <menu class="right">
-            <button id="start-game" class="material-symbols-outlined btn" title="play" onclick="start_game(this)">chess</button>
-        </menu>
-    </header>
-
     <main>
         <div class="left-panel">
-
+            <button id="start-game" class="material-symbols-outlined btn" title="play" onclick="start_game(this)">chess</button>
         </div>
 
-        <div class="main-panel">
-            <div class="black-player"></div>
+        <div class="main-panel" game-started="false">
+            <div class="player-side">
+                <div class="player-info">
+                    <span class="black-player"></span>
+                </div>
+                
+                <span class="timer">10:00</span>
+            </div>
+
             <div class="board-container">
                 <!-- chess board -->
             </div>
-            <div class="white-player"></div>
+            <div class="player-side">
+                <div class="player-info">
+                    <span class="white-player"></span>
+                </div>
+
+                <span class="timer">10:00</span>
+            </div>
         </div>
 
         <div class="right-panel">
@@ -233,6 +240,8 @@
                 game_state.black_player = player_color == "b" ? player1 : player2
                 send_message("start-game", {game_mode: game_mode, player_color: player_color, player1: player1, player2: player2}, true, "Starting game...");
             }
+
+            d3.select("div.main-panel").attr("game-started", "true");
         }
 
         function game_mode_change() {
