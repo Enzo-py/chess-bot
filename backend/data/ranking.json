@@ -34,5 +34,11 @@
         "type": "AI",
         "elo": 600,
         "games": []
+    },
+    {
+        "model": "MCTS AI",
+        "type": "AI",
+        "elo": 600,
+        "games": []
     }
 ]

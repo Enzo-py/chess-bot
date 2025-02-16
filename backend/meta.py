@@ -3,6 +3,7 @@ from models.greedy_ai import GreedyAI
 from models.greedy_exploration import GreedyExplorationAI
 from models.stockfish import StockfishAI
 from models.alpha_beta import SunfishAI
+from models.mcts import MonteCarloAI
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
@@ -10,6 +11,7 @@ AVAILABLE_MODELS = {
     "GreedyExploration AI": GreedyExplorationAI,
     "Stockfish AI": StockfishAI,
     "Sunfish AI": SunfishAI,
+    "MCTS AI": MonteCarloAI,
 }
 """
 This dictionary exposes all the models that are available for testing or using in the interface.
