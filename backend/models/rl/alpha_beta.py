@@ -1,4 +1,4 @@
-from .engine import Engine
+from models.engine import Engine
 import chess
 import time
 from collections import namedtuple
@@ -8,9 +8,13 @@ class SunfishAI(Engine):
     """
     Implementation of Sunfish chess algorithm within the Engine framework.
     """
+
+    __author__ = "Shashuat ..."
+    __description__ = "Chess AI that uses the Sunfish engine."
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
         # Piece values from Sunfish
         self.piece_values = {
             chess.PAWN: 100,

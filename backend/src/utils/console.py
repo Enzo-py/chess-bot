@@ -26,3 +26,6 @@ class Style:
     
     def __str__(self):
         return self.__repr__()
+    
+    def __add__(self, other):
+        return self.__repr__() + str(other)

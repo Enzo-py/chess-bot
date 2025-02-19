@@ -1,4 +1,4 @@
-from .engine import Engine
+from models.engine import Engine
 import chess
 import numpy as np
 
@@ -6,6 +6,9 @@ class GreedyAI(Engine):
     """
     Optimized Greedy AI that plays as strongly as possible with a single-move evaluation.
     """
+
+    __author__ = "Enzo Pinchon"
+    __description__ = "Optimized Greedy AI that plays as strongly as possible with a single-move evaluation."
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

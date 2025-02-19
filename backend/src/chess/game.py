@@ -1,7 +1,10 @@
 try: from .player import Player
 except ImportError: from player import Player
 
+import io
 import chess
+import chess.pgn
+import numpy as np
 
 class Game:
     BB_EDGE = chess.SquareSet(chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_FILE_A | chess.BB_FILE_H)
@@ -25,9 +28,19 @@ class Game:
 
         self.ia_move_handler = None
         self.draw = None
+
         self.checkmate = None
         self.king_in_check = {chess.WHITE: False, chess.BLACK: False}
         self.last_player = chess.BLACK
+
+        self.one_hot_idx = {
+            'K': 0, 'Q': 1, 'N': 2, 'B': 3, 'R': 4, 'P': 5,  # White pieces
+            'k': 6, 'q': 7, 'n': 8, 'b': 9, 'r': 10, 'p': 11,  # Black pieces
+            '.': 12  # Empty square
+        }
+
+        self.history = []
+        self.winner = None
 
     def __str__(self):
         return self.board.__str__()
@@ -37,10 +50,95 @@ class Game:
 
     def fen(self):
         return self.board.fen()
-       
-    def load_fen(self, fen):
+    
+    def _update_game_state(self):
+        if self.board.is_checkmate():
+            self.checkmate = not self.board.turn # TODO update ?
+        else:
+            self.checkmate = None
+
+        self.draw = self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.is_seventyfive_moves() or self.board.is_fivefold_repetition()
+        self.king_in_check = {
+            chess.WHITE: self.board.is_check() and self.board.turn == chess.WHITE,
+            chess.BLACK: self.board.is_check() and self.board.turn == chess.BLACK
+        }
+        self.last_player = chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK
+
+        if self.board.is_checkmate() and self.winner is None:
+            self.winner = self.last_player
+    
+    def rewind(self, nb_moves):
+        for _ in range(nb_moves):
+            self.board.pop()
+
+        self._update_game_state()
+
+    def reverse(self):
+        """
+            Return a new instance of game with the exact reversed position
+        """
+        return self #TODO
+    
+    def _load_fen(self, fen):
         self.board = chess.Board(fen)
+        self.draw = self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.is_seventyfive_moves() or self.board.is_fivefold_repetition()
+        self.checkmate = self.board.is_checkmate()
+        self.king_in_check = {chess.WHITE: self.board.is_check() and self.board.turn == chess.WHITE, chess.BLACK: self.board.is_check() and self.board.turn == chess.BLACK}
+        self.last_player = chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK
+
         return self
+    
+    def _load_pgn(self, pgn_string):
+        """
+        Load a PGN game from a string.
+        :param pgn_string: PGN game as a string
+        :type pgn_string: str
+        :return: self
+        :rtype: Game
+        """
+        pgn_io = io.StringIO(pgn_string)
+        game = chess.pgn.read_game(pgn_io)
+
+        if game is None:
+            raise ValueError("Invalid PGN format")
+
+        self.board = game.board()
+        for i, move in enumerate(game.mainline_moves()):
+            self.board.push(move)  # Play all moves
+            self.history.append(move)
+
+        # Check game state
+        if self.board.is_checkmate():
+            self.checkmate = not self.board.turn  # The player to move is in checkmate (loser)
+        else:
+            self.checkmate = None  # No checkmate
+
+        self.draw = self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.is_seventyfive_moves() or self.board.is_fivefold_repetition()
+        self.king_in_check = {
+            chess.WHITE: self.board.is_check() and self.board.turn == chess.WHITE,
+            chess.BLACK: self.board.is_check() and self.board.turn == chess.BLACK
+        }
+        self.last_player = chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK
+        self.winner = self.last_player
+        return self
+
+       
+    def load(self, data, format="fen"):
+        """
+        Load a game from a string.
+        :param data: data to load
+        :type data: str
+        :param format: format of the data (fen or pgn)
+        :type format: str
+        :return: self
+        :rtype: Game
+        """
+        if format == "fen":
+            return self._load_fen(data)
+        elif format == "pgn":
+            return self._load_pgn(data)
+        else:
+            raise Exception("Invalid format")
     
     def move(self, move: chess.Move):
         # check if the move is legal
@@ -60,6 +158,7 @@ class Game:
             self.draw = "fivefold repetition"
         elif self.board.is_checkmate():
             self.checkmate = self.last_player
+            self.winner = self.last_player
         
         if self.board.is_check():
             self.king_in_check[self.last_player] = True
@@ -87,6 +186,48 @@ class Game:
         self.move(move)
 
         if self.ia_move_handler is not None: self.ia_move_handler(move)
+
+    def one_hot(self):
+        """ Converts the chess board to a 8x8x13 one-hot encoded representation. """
+
+        board_matrix = np.zeros((8, 8, 13), dtype=int)
+        board_str = str(self.board).replace("\n", " ").split()
+
+        for i in range(8):
+            for j in range(8):
+                piece = board_str[i * 8 + j]
+                index = self.one_hot_idx[piece]
+                board_matrix[i, j, index] = 1  # One-hot encoding
+
+        return board_matrix
+    
+    def one_hot_to_fen(self, one_hot_board):
+        """ Converts a 8x8x13 one-hot encoded board back to FEN notation. """
+        fen_rows = []
+
+        for row in one_hot_board:
+            fen_row = ""
+            empty_count = 0
+
+            for square in row:
+                piece_index = np.argmax(square)  # Get the index of the 1 in the one-hot vector
+                piece = self.one_hot_idx[piece_index]
+
+                if piece == '.':
+                    empty_count += 1
+                else:
+                    if empty_count > 0:
+                        fen_row += str(empty_count)
+                        empty_count = 0
+                    fen_row += piece
+
+            if empty_count > 0:
+                fen_row += str(empty_count)
+
+            fen_rows.append(fen_row)
+
+        fen = "/".join(fen_rows) + " w - - 0 1"  # Default values for turn, castling, en passant, etc.
+        return fen
     
     def get_score(self, color):
         """
@@ -152,6 +293,30 @@ class Game:
             y -= 1
             coords = (x, y)
         return coords
+    
+    def get_box_label(self, *args) -> str:
+        """
+        Get the label of a box.
+        """
+
+        if len(args) == 1:
+            coords = args[0]
+            if type(coords) is str: return coords
+            else: # idx
+                x = coords % 8
+                y = coords // 8
+                coords = (x, y)
+
+        else:
+            coords = (args[0], args[1])
+
+        if type(coords) == tuple:
+            x, y = coords
+            if type(x) == int:
+                x = chr(x + 65)
+                y += 1
+            coords = x + str(y)
+        return coords
 
     def get_piece(self, *args) -> chess.Piece:
         """
@@ -207,7 +372,7 @@ class Game:
             black.game = self
 
         if fen is not None:
-            self.load_fen(fen)
+            self.load(fen)
         else:
             self.board = chess.Board()
 

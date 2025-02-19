@@ -1,4 +1,4 @@
-from .engine import Engine
+from models.engine import Engine
 import chess
 import random
 import math
@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 class MCTSNode:
     """Node in the MCTS tree."""
+    
     def __init__(self, board: chess.Board, parent: Optional['MCTSNode'] = None, move: Optional[chess.Move] = None):
         self.board = board.copy()
         self.parent = parent
@@ -31,6 +32,9 @@ class MonteCarloAI(Engine):
     Monte Carlo Tree Search AI that uses MCTS algorithm to select moves. 
     Implemented some heuristics and optimizations that guide the search more effectively. Instead of purely random playouts, it uses move selection based on piece values (MVV-LVA principle) and positional advantages . Improved evaluation function. weighted random selection explore/exploit. Check previous commit for the initial simple version.
     """
+
+    __author__ = "Shashuat ..."
+    __description__ = "Monte Carlo Tree Search AI that uses MCTS algorithm to select moves."
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

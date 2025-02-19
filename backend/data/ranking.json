@@ -40,5 +40,11 @@
         "type": "AI",
         "elo": 600,
         "games": []
+    },
+    {
+        "model": "Score CNN",
+        "type": "AI",
+        "elo": 600,
+        "games": []
     }
 ]
