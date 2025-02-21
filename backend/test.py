@@ -1,5 +1,6 @@
 import chess
-from models.deep_engine import DeepEngine
+from models.cnn.cnn_score import CNNScore
+from models.deep_engine import *
 
 from src.chess.game_generator import GameGenerator
 from src.chess.game import Game
@@ -19,12 +20,17 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
     
     print("Setup environment...")
-    model = DeepEngine()
+    model = CNNScore()
+
+    with model | all_heads | on_games | with_prints as env:
+        env.train()
+        env.test()
     
-    nb_batches = 20
-    batch_size = 64
-    epochs = 20
-    test_size = 10
+    exit()
+    nb_batches = 1
+    batch_size = 2
+    epochs = 15
+    test_size = 3
 
     games: list[Game] = []
     ld = Loader()
@@ -36,112 +42,35 @@ if __name__ == "__main__":
     for _ in range(nb_batches*2 + test_size): next(games_getter) # Skip the first games
     print("Environment ready.")
 
-    puzzles = []
-    moves = []
+    games_train = []
+    moves_train = []
     for _ in tqdm.tqdm(range(nb_batches)):
         for puzzle in next(puzzles_getter):
             if puzzle.fen is not None:
-                puzzles.append(puzzle.game)
-                moves.append(puzzle.moves[0])
+                for idx in range(len(puzzle.moves) - 1):
+                    games_train.append(puzzle.game)
+                    moves_train.append(puzzle.moves[0])
+                    puzzle.game = puzzle.game.copy()
+                    puzzle.game.move(puzzle.moves[0])
+                    puzzle.moves = puzzle.moves[1:]
+                        
 
-
-    model.train(puzzles, moves, 10)
-
-
+    print("\ntraining:")
+    model.train(games_train, moves_train, epochs=epochs, batch_size=batch_size)
+    
     # 1. test
-    acc = model.evaluate(puzzles, moves)
-    print(acc)
+    games_test = []
+    moves_test = []
 
-    # 2. train the model on legal moves
+    for _ in tqdm.tqdm(range(test_size)):
+        for puzzle in next(puzzles_getter):
+            if puzzle.fen is not None:
+                games_test.append(puzzle.game)
+                moves_test.append(puzzle.moves[0])
 
-    # 2.1 get some games
-    # for _ in tqdm.tqdm(range(nb_batches)):
-    #     games.extend(next(games_getter))
+    print("\ntesting:")
+    acc = model.test(games_test, moves_test)
+    print(acc) 
 
-    # # 2.2 randomly rewind the games
-    # for game in games:
-    #     if len(game.history) <= 1: continue
-    #     game.rewind(random.randint(0, len(game.history) - 1))
-
-    # 2.3 get the data correctly formatted
-    # one_hots = torch.stack([torch.tensor(game.one_hot(), dtype=torch.float) for game in games])
-    # turns = torch.tensor([int(game.board.turn) for game in games], dtype=torch.float)
-    # y = [[move.uci() for move in game.board.legal_moves] for game in games]
-
-    # one_hots, turns = one_hots.to(device), turns.to(device)
-
-    # # 2.4 train the model
-    # model.fit_legal_moves(one_hots, turns, y, epochs=epochs)
-
-    # model.save("backend/models/cnn/cnn_score_legal_moves.pth", "legal-move-classifier")
-    # model.save("backend/models/cnn/cnn_score_embedding.pth", "feature-extractor")
-
-    # # ----------------------------------------------------------------------------
-    # # 2. test the legal moves head --> (initial) 0.21% accuracy
-    # games = []
-    # # 2.1 get some games
-    # for _ in tqdm.tqdm(range(10)):
-    #     games.extend(next(games_getter))
-
-    # # 2.2 randomly rewind the games
-    # for game in games:
-    #     if len(game.history) <= 1: continue
-    #     game.rewind(random.randint(0, len(game.history) - 1))
-
-    # # 2.3 get the data correctly formatted
-    # one_hots = [game.one_hot() for game in games]
-    # turns = [int(game.board.turn) for game in games]
-    # y = [[move.uci() for move in game.board.legal_moves] for game in games]
-
-    # # 2.4 evaluate the model
-    # acc = model.evaluate_legal_moves(one_hots, turns, y)
-    # print(f"Accuracy before training: {acc:.2%}")
-
-    # ----------------------------------------------------------------------------
-    # 3. train the model on the game outcome
-
-    # # 3.1 get some games
-    # for _ in tqdm.tqdm(range(nb_batches)):
-    #     games.extend(next(games_getter))
-
-    # # 3.2 randomly rewind the games
-    # for game in games:
-    #     if len(game.history) <= 1: continue
-    #     game.rewind(random.randint(min(len(game.history) - 2, 1), min(len(game.history) - 1, 4)))
-
-    # # 3.3 get the data correctly formatted
-    # one_hots = torch.stack([torch.tensor(game.one_hot(), dtype=torch.float) for game in games])
-    # turns = torch.tensor([int(game.board.turn) for game in games], dtype=torch.float)
-    # y = [int(game.winner) for game in games]
-
-    # one_hots, turns = one_hots.to(device), turns.to(device)
-
-    # # 3.4 train the model
-    # model.fit(one_hots, turns, y, epochs=epochs)
-
-    model.save("backend/models/cnn/cnn_score_embedding.pth", "feature-extractor")
-    model.save("backend/models/cnn/cnn_score_classifier.pth", "score-classifier")
-
-
-    # 1. test the model without training --> (initial) 12% accuracy
-    # games = []
-    # # 1.1 get some games
-    # for _ in tqdm.tqdm(range(10)):
-    #     games.extend(next(games_getter))
-
-    # # 1.2 randomly rewind the games
-    # for game in games:
-    #     if len(game.history) <= 1: continue
-    #     game.rewind(random.randint(min(len(game.history) - 2, 1), min(len(game.history) - 1, 4)))
-
-    # # 1.3 get the data correctly formatted
-    # one_hots = [game.one_hot() for game in games]
-    # turns = [int(game.board.turn) for game in games]
-    # y = [int(game.winner) for game in games]
-
-    # # 1.4 evaluate the model
-    # acc = model.evaluate(one_hots, turns, y)
-    # print(f"Accuracy before training: {acc:.2%}")
-
-
+    model.save() 
     

@@ -35,8 +35,7 @@ class Game:
 
         self.one_hot_idx = {
             'K': 0, 'Q': 1, 'N': 2, 'B': 3, 'R': 4, 'P': 5,  # White pieces
-            'k': 6, 'q': 7, 'n': 8, 'b': 9, 'r': 10, 'p': 11,  # Black pieces
-            '.': 12  # Empty square
+            'k': 6, 'q': 7, 'n': 8, 'b': 9, 'r': 10, 'p': 11  # Black pieces
         }
 
         self.history = []
@@ -73,12 +72,40 @@ class Game:
 
         self._update_game_state()
 
+    
     def reverse(self):
         """
-            Return a new instance of game with the exact reversed position
+        Return a new instance of Game with the exact reversed position.
         """
-        return self #TODO
+        new_game = Game()
+        new_game.board = self.board.mirror()  # Flip the board position
+        new_game.last_player = not self.last_player  # Swap turn
+
+        # Copy over relevant attributes
+        new_game.white = self.white
+        new_game.black = self.black
+        new_game.ia_move_handler = self.ia_move_handler
+        new_game.draw = self.draw
+        new_game.checkmate = None if self.checkmate is None else not self.checkmate
+        new_game.king_in_check = {
+            chess.WHITE: self.king_in_check[chess.BLACK],
+            chess.BLACK: self.king_in_check[chess.WHITE]
+        }
+        new_game.history = self.history.copy() # Copy the move history not REVERSED: TODO ?
+        new_game.winner = None if self.winner is None else not self.winner
+
+        return new_game
     
+    def copy(self):
+        """
+            Return a new instance of the game with the exact same position
+        """
+        cpy = Game().load(self.fen())
+        cpy.white = self.white
+        cpy.black = self.black
+        cpy.ia_move_handler = self.ia_move_handler
+        return cpy
+
     def _load_fen(self, fen):
         self.board = chess.Board(fen)
         self.draw = self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.is_seventyfive_moves() or self.board.is_fivefold_repetition()
@@ -196,8 +223,9 @@ class Game:
         for i in range(8):
             for j in range(8):
                 piece = board_str[i * 8 + j]
-                index = self.one_hot_idx[piece]
-                board_matrix[i, j, index] = 1  # One-hot encoding
+                index = self.one_hot_idx.get(piece)
+                if index is not None:
+                    board_matrix[i, j, index] = 1
 
         return board_matrix
     
@@ -380,6 +408,25 @@ class Game:
 
     def is_game_over(self):
         return self.checkmate is not None or self.draw is not None
+    
+    @staticmethod
+    def reverse_move(uci_move):
+        """
+        Reverse a (UCI) move (e.g., "e2e4" becomes "e7e5").
+        """
+        auto_cast = False
+        if type(uci_move) is chess.Move:
+            auto_cast = True
+            uci_move = uci_move.uci()
+
+        x1 = chess.square_name(chess.square_mirror(chess.parse_square(uci_move[:2])))
+        x2 = chess.square_name(chess.square_mirror(chess.parse_square(uci_move[2:4])))
+        move_reversed = x1 + x2
+        if len(uci_move) == 5:
+            move_reversed += uci_move[4]
+
+        return move_reversed if not auto_cast else chess.Move.from_uci(move_reversed)
+
 
 
 if __name__ == "__main__":

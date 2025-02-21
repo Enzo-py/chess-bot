@@ -1,9 +1,10 @@
+from abc import abstractmethod, ABC
 from src.chess.game import Game
 from src.chess.player import Player
 
 from src.utils.console import Style
 
-class Engine(Player):
+class Engine(Player, ABC):
 
     class UndefinedAuthorError(Exception):
         def __init__(self, engine: type, *args):
@@ -34,6 +35,7 @@ class Engine(Player):
         self.color: str = 'undefined'
         self.game: Game = None
 
+    @abstractmethod
     def play(self) -> dict:
         """
         Return the move played by the AI.
