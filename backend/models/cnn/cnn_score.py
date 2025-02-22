@@ -29,15 +29,34 @@ class ScoreModelCNN(ScoreModel):
 
         self.embedding = ChessEmbedding()
         self.classifier = ScoreClassifier()
+        self.generative_head = GenerativeHead()
 
         self.set_device()
+
+class GenerativeHead(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.fc1 = nn.Linear(512+256, 1024)
+        self.fc2 = nn.Linear(1024, 2048)
+        self.fc3 = nn.Linear(2048, 64*64*5)
+
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = F.relu(self.fc2(x))
+        x = self.dropout(x)
+        x = self.fc3(x)
+        return x
 
 class ScoreClassifier(nn.Module):
     def __init__(self):
         super().__init__()
 
         self.MLP1 = nn.Sequential(
-            nn.Linear(512, 256),
+            nn.Linear(512+256, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.LayerNorm(256),  # ✅ Better than BatchNorm for small batches
@@ -50,63 +69,15 @@ class ScoreClassifier(nn.Module):
             nn.LayerNorm(128),
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(64, 2)  # No softmax (loss handles it)
+            nn.Linear(64, 2)
         )
 
     def forward(self, x):
         x = self.MLP1(x)  # Shape: (batch, 256)
         x = self.MLP2(x)  # Shape: (batch, 2)
 
-        return F.softmax(x, dim=1)  # ✅ Works with NLLLoss
+        return F.softmax(x, dim=1)
     
-class LegalMoveClassifier(nn.Module):
-    def __init__(self, input_dim=512):
-        super().__init__()
-
-        self.attention = nn.MultiheadAttention(embed_dim=512, num_heads=4, batch_first=True)
-
-        self.mlp = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.BatchNorm1d(256),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128),
-            nn.Dropout(0.2)
-        )
-
-        # Instead of separate "from" and "to" squares, we predict a 64x64 move mask
-        self.move_head = nn.Sequential(
-            nn.Linear(128, 256),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, 512),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(512, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 64 * 64)  # Predicts move matrix
-        ) #nn.Linear(128, 64 * 64)  # Predicts move matrix
-        self.promotion_head = nn.Linear(128, 5)  # Predicts promotion choices
-
-    def forward(self, x):
-
-        x = x.unsqueeze(1)  # Add sequence dimension (batch, 1, 512)
-        x, _ = self.attention(x, x, x)  # Self-attention
-        x = x.squeeze(1)  # Remove sequence dimension
-
-        x = self.mlp(x)
-
-        move_logits = self.move_head(x)  # (batch, 64*64)
-        move_logits = move_logits.view(-1, 64, 64)  # Reshape to (batch, 64, 64)
-        move_probs = torch.sigmoid(move_logits)  # Sigmoid activation for multi-label
-
-        promo_logits = self.promotion_head(x)  # (batch, 5)
-        promo_probs = torch.sigmoid(promo_logits)  # Sigmoid for multiple promotions
-
-        return move_probs, promo_probs
-
 class ChessEmbedding(nn.Module):
     def __init__(self):
         super().__init__()
@@ -114,7 +85,7 @@ class ChessEmbedding(nn.Module):
         self.resn2 = ResBlock(128, 128, 256, 6, 1, 2)  # (batch, 256, 8, 8)
         self.resn3 = ResBlock(256, 256, 512, 3, 2, 1)  # (batch, 512, 4, 4)
         self.resn4 = ResBlock(512, 512, 512, 3, 1, 1)  # (batch, 512, 4, 4)
-        self.resn5 = ResBlock(512, 512, 256, 6, 2, 1)  # Changed 512 - 4 * 8 * 8 to 256
+        self.resn5 = ResBlock(512, 512, 512, 6, 2, 1)  # Changed 512 - 4 * 8 * 8 to 256
 
         self.heatmap1 = HeatMap()
         self.heatmap2 = HeatMap()
@@ -125,7 +96,7 @@ class ChessEmbedding(nn.Module):
         self.pos_embed = PositionalEncoding(4)
         self.heatmap_attention = CBAMChannelAttention(4, 4)
 
-        self.self_attention = nn.MultiheadAttention(embed_dim=512, num_heads=4, batch_first=True)
+        # self.self_attention = nn.MultiheadAttention(embed_dim=512, num_heads=4, batch_first=True)
 
         self.dropout = nn.Dropout(0.15)
 
@@ -154,19 +125,19 @@ class ChessEmbedding(nn.Module):
         concat_heatmap = self.pos_embed(concat_heatmap)  # Add positional encoding
         concat_heatmap = self.heatmap_attention(concat_heatmap)  # (batch, 4, 8, 8)
 
-        # Flatten heatmap: (batch, 4, 8, 8) -> (batch, 4 * 8 * 8)
+        # # Flatten heatmap: (batch, 4, 8, 8) -> (batch, 4 * 8 * 8)
         concat_heatmap = concat_heatmap.view(concat_heatmap.size(0), -1)
 
         # Flatten CNN output: (batch, 256, 1, 1) -> (batch, 256)
         x = x.view(x.size(0), -1)
 
-        # Concatenate CNN output with heatmap features
-        x = torch.cat((x, concat_heatmap), dim=1)  # Adjusted for correct feature size (batchsize, 256 + 256)
+        # # Concatenate CNN output with heatmap features
+        x = torch.cat((x, concat_heatmap), dim=1)  # Adjusted for correct feature size (batchsize, 512 + 256)
         
-        # Apply self-attention
-        x = x.unsqueeze(1)
-        x, _ = self.self_attention(x, x, x)
-        x = x.squeeze(1)
+        # # Apply self-attention
+        # x = x.unsqueeze(1)
+        # x, _ = self.self_attention(x, x, x)
+        # x = x.squeeze(1)
 
         return x
 

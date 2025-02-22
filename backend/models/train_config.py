@@ -6,7 +6,7 @@ __all__ = ["TrainConfig", "TrainConfigBase", "AllHeads", "GenerativeHead", "Boar
 class TrainConfig:
     """Configuration de l'entraînement via `|`."""
 
-    line_length = 50
+    line_length = 80
 
     class UndefinedConfigError(Exception):
         def __init__(self, configs, *args):
@@ -28,8 +28,8 @@ class TrainConfig:
             line_right = f"Engine: <{self.engine.__class__.__name__}>"
 
             print(f"| {(line_left + line_right):<{self.line_length-3}} |")
-            line = "Mode: <" + self.engine._train_config["mode"] + "> | Head: <" + self.engine._train_config["head"] + ">"
-            print(f"| {line: ^{self.line_length-2}} |")
+            line = f"On <{self.engine._train_config['mode']}> with <{self.engine._train_config['head']}> head"
+            print(f"| {line: <{self.line_length-2}} |")
             print('|' + '─'*self.line_length + '|')
 
         return self
@@ -39,8 +39,13 @@ class TrainConfig:
 
         # check if error
         if exc_type is not None:
-            print("❌" + Style("ERROR", f"An error occured: {exc_value}"))
-            print("_"*50)
+            msg = Style(None, f"An error occured: {exc_value}", auto_break=True, max_length=self.line_length-2).__str__()
+            lines = msg.split("\n")
+            print("|" + "─"*self.line_length + "|")
+            for line in lines:
+                print(f"| {Style('ERROR', line.strip()).__str__(): <{self.line_length+7}} |")
+            print("╰" + "─"*self.line_length + "╯")
+            return
         
         if self.engine._train_config["UI"] == 'prints':
             line = "✅ Training session completed"
@@ -52,7 +57,7 @@ class TrainConfig:
         """Applique une configuration."""
         return value.apply(self.engine)
 
-    def train(self, **data):
+    def train(self, epochs=10, batch_size=16, **data):
         """
             Exécute l'entraînement. ---------------
             wow
@@ -67,22 +72,45 @@ class TrainConfig:
             raise TrainConfig.UndefinedConfigError(undefined_config)
         
         if self.engine._train_config["UI"] == 'prints':
-            line = ">> Start training"
+            line = ">> Start training for " + str(epochs) + " epochs"
             print(f"| {line: <{self.line_length-2}} |")
 
         if self.engine._train_config["mode"] == "puzzles":
-            output = self.engine._train_on_puzzles(**data)
+            output = self.engine._train_on_puzzles(epochs=epochs, batch_size=batch_size, **data)
         elif self.engine._train_config["mode"] == "games":
-            output = self.engine._train_on_games(**data)
+            output = self.engine._train_on_games(epochs=epochs, batch_size=batch_size, **data)
         else:
             raise ValueError("Mode not unknown")
         
         return output
         
 
-    def test(self, _plot=False):
+    def test(self, _plot=False, **data):
         """Évalue le modèle."""
-        self.engine.test(_plot=_plot)
+        
+        undefined_config = []
+        if self.engine._train_config["head"] is None:
+            undefined_config.append("head")
+        if self.engine._train_config["mode"] is None:
+            undefined_config.append("mode")
+
+        if len(undefined_config) > 0:
+            raise TrainConfig.UndefinedConfigError(undefined_config)
+        
+        if self.engine._train_config["UI"] == 'prints':
+            line = ">> Start testing"
+            print(f"| {line: <{self.line_length-2}} |")
+
+        if self.engine._train_config["mode"] == "puzzles":
+            output = self.engine._test_on_puzzles(_plot=_plot, **data)
+
+        elif self.engine._train_config["mode"] == "games":
+            output = self.engine._test_on_games(_plot=_plot, **data)
+
+        else:
+            raise ValueError("Mode not unknown")
+        
+        return output
 
     @property
     def print(self):

@@ -4,7 +4,7 @@ from models.greedy.greedy_exploration import GreedyExplorationAI
 from models.downloaded.stockfish import StockfishAI
 from models.rl.alpha_beta import SunfishAI
 from models.rl.mcts import MonteCarloAI
-from models.deep_engine import DeepEngine
+from models.cnn.cnn_score import CNNScore
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
@@ -13,7 +13,7 @@ AVAILABLE_MODELS = {
     "Stockfish AI": StockfishAI,
     "Sunfish AI": SunfishAI,
     "MCTS AI": MonteCarloAI,
-    "Score CNN": DeepEngine,
+    "Score CNN": CNNScore,
 }
 """
 This dictionary exposes all the models that are available for testing or using in the interface.

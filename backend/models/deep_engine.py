@@ -1,9 +1,10 @@
 from functools import wraps
 from typing import Union
+from src.utils.console import Style
 from src.chess.game import Game
 from models.engine import Engine
 from models.train_config import *
-from models.template import DefaultClassifier, Embedding
+from models.template import DefaultClassifier, Embedding, DefaultGenerativeHead
 
 import chess
 import tqdm
@@ -22,6 +23,14 @@ class DeepEngine(Engine):
     __author__ = "Enzo Pinchon"
     __description__ = "Simple AI that plays random moves."
 
+    PROMOTION_TABLE = {
+        None: 0,
+        chess.QUEEN: 1,
+        chess.KNIGHT: 2,
+        chess.BISHOP: 3,
+        chess.ROOK: 4
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -29,8 +38,12 @@ class DeepEngine(Engine):
         """torch.nn.Module: The model used to score the games."""
 
         self.is_loaded = False
+        self.auto_save_version = None
         self._train_config = {"mode": None, "head": None, "UI": None, "auto_save": False}
 
+    def __or__(self, other: TrainConfigBase) -> TrainConfig:
+        """Permet d'enchaîner les configurations avec `|` et retourne le bon type."""
+        return other.apply(self)
 
     def play(self, **kwargs):
         """
@@ -45,25 +58,11 @@ class DeepEngine(Engine):
             else:
                 raise FileNotFoundError(f"Model not found at {path}")
 
+        scores = self.predict()
         legal_moves = list(self.game.board.legal_moves)
-        if not legal_moves:
-            return None
-        
-        scores = {}
-        for move in legal_moves:
-            self.game.board.push(move)
-            with torch.no_grad():
-                scores[move], _ = self.score_function([self.game])
-            self.game.board.pop()
+        scores = [scores[self.encode_move(move, as_int=True)] for move in legal_moves]
+        return legal_moves[scores.index(max(scores))]
 
-            x = scores[move].tolist()[0]
-            scores[move] = x[int(self.color)]
-            print(f"Move: {move} - Score: {scores[move]} || {x[int(not self.color)]}")
-
-        best_move = max(scores, key=scores.get)
-        # for m, s in scores.items():
-        #     print(f"{m}: {s}", "  <---" if m == best_move else "")
-        return best_move
     
     def load(self, path: str=None, element: str="all"):
         """
@@ -107,58 +106,58 @@ class DeepEngine(Engine):
         elif element == "classifier":
             torch.save(self.score_function.classifier.state_dict(), path)
 
-    def info_nce_loss(self, features, temperature=0.1):
+    def _train_on_puzzles(self, epochs: int, batch_size, **data):
         """
-        Compute the InfoNCE loss for contrastive learning.
+        Train the model on puzzles.
+        """
+        games = data.get("games", None)
+        best_moves = data.get("moves", None) or data.get("best_moves", None)
+
+        assert games is not None, "You need to provide games to train on."
+        assert best_moves is not None, "You need to provide best moves to train on."
+
+        if self._train_config["head"] == "all":
+            ...
+        elif self._train_config["head"] == "generative":
+            ...
+        elif self._train_config["head"] == "board_evaluation":
+            return self._train_board_evaluation(epochs, batch_size, games, best_moves, format="move")
+        elif self._train_config["head"] == "encoder":
+            ...
+        else:
+            raise ValueError(f"Invalid head: {self._train_config['head']}")
         
-        :param features: Tensor of shape (batch_size, embedding_dim)
-        :param temperature: Temperature parameter for scaling
-        :return: loss value
+    def _train_board_evaluation(self, epochs: int, batch_size, games: list[Game], labels: Union[list[int], list[chess.Move]], format):
+        """
+        Train the model on the board evaluation head.
+
+        :param epochs: number of epochs
+        :type epochs: int
+
+        :param batch_size: size of the batch
+        :type batch_size: int
+
+        :param games: list of games
+        :type games: list[Game]
+
+        :param labels: list of labels -> the list of int (0 black win, 1 white win) OR the list of best moves (1 per game)
+        :type labels: Union[list[int], list[chess.Move]]
+
+        :param format: format of the labels (either "int" or "move")
+        :type format: str
         """
 
-        batch_size = features.shape[0]
-        device = features.device
+        assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
+        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+        assert isinstance(labels[0], (int, chess.Move)), "'labels' should be a list of integers or instances of <chess.Move>."
+        assert format in ["int", "move"], "Invalid format for labels, should be either 'int' or 'move'."
 
-        # Normalize embeddings
-        features = F.normalize(features, dim=1)  
+        if format == "move":
+            self._train_board_evaluation_puzzles(games, labels, epochs, batch_size)
+        else:
+            raise NotImplementedError("Training on board evaluation with integer labels is not implemented yet.")
 
-        # Compute similarity matrix (cosine similarity)
-        similarity_matrix = torch.matmul(features, features.T)
-
-        # Create labels (identity matrix for positive pairs)
-        labels = torch.eye(batch_size, dtype=torch.float, device=device)
-
-        # Mask out self-comparisons
-        mask = torch.eye(batch_size, dtype=torch.bool, device=device)
-        similarity_matrix = similarity_matrix[~mask].view(batch_size, -1)
-        labels = labels[~mask].view(batch_size, -1)
-
-        # Separate positives and negatives
-        positives = similarity_matrix[labels.bool()].view(batch_size, -1)
-        negatives = similarity_matrix[~labels.bool()].view(batch_size, -1)
-
-        # Concatenate positives and negatives (positives first)
-        logits = torch.cat([positives, negatives], dim=1)
-        labels = torch.zeros(logits.shape[0], dtype=torch.long, device=device)
-
-        # Apply temperature scaling
-        # logits = logits / temperature
-
-        # Compute loss
-        return F.cross_entropy(logits, labels)
-
-    # train mode:
-    # 1. from puzzle (cleanest way: cuz puzzle is perfect move)
-    # 2. from game (more data, but less perfect, however can understand more commun situation and better understand of loosing)
-    # 3. Auto encoder (board to board, improve the embedding, but not able to predict the best move)
-
-    # other idears:
-    # 1. getting the score for white and black (understand the position, basic value of pieces, but not meaningfull)
-    # 2. getting the list of legal moves (understand the position / rules, but not linked to the best move, only game rules / representation)
-    # 3. generating the best move (over hard: generation have to respect rules etc, less safe than just giving scores) ??
-    # 4. get nb attacks per square (understand the position / turn notion, weak learning)
-
-    def train2(self, games: list[Game], best_moves: list[chess.Move], epochs: int, batch_size: int = 32):
+    def _train_board_evaluation_puzzles(self, games: list[Game], best_moves: list[chess.Move], epochs: int, batch_size: int = 32):
         """
         Train the model using batches instead of processing one element at a time.
 
@@ -195,6 +194,9 @@ class DeepEngine(Engine):
         all_embedding_loss = []
         all_classification_loss = []
 
+        # if self._train_config["UI"] == 'prints':
+        #     print(f"\t {num_batches} batches of {batch_size} games of x moves each.")
+
         for epoch in range(epochs):
             total_loss = 0
             contrastive_loss_total = 0
@@ -202,10 +204,7 @@ class DeepEngine(Engine):
             classification_loss_total = 0
 
             indices = torch.randperm(num_samples)  # Shuffle indices
-            for batch_idx in tqdm.tqdm(
-                range(num_batches), 
-                desc=f"{num_batches} batches of {batch_size} games of x moves"
-            ):
+            for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
                 
                 batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
                 batch_games = [games[i] for i in batch_indices]
@@ -276,36 +275,269 @@ class DeepEngine(Engine):
             all_embedding_loss.append(embedding_loss_total / num_batches)
             all_classification_loss.append(classification_loss_total / num_batches)
 
-            print(f"|___ [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Contrastive Loss: {contrastive_loss_total / num_batches:.2f}, Embedding Loss: {embedding_loss_total / num_batches:.2f} Classification Loss: {classification_loss_total / num_batches:.2f}\n")
+            if self._train_config["UI"] == 'prints':
+                l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Contrastive Loss: {contrastive_loss_total / num_batches:.2f}, " 
+                l2 = f"  Embedding Loss: {embedding_loss_total / num_batches:.2f} Classification Loss: {classification_loss_total / num_batches:.2f}"
+                l1 = Style("INFO", f"{l1: <{TrainConfig.line_length-2}}")
+                l2 = Style("INFO", f"{l2: <{TrainConfig.line_length-2}}")
+                print(f"| {l1} |")
+                print(f"| {l2} |")
+                print(f"| {'': <{TrainConfig.line_length-2}} |")
 
         return all_total_loss, all_contrastive_loss, all_embedding_loss, all_classification_loss
+
+    def _train_on_games(self, epochs: int, batch_size, **data):
+        """
+        Train the model on games.
+        """
+
+        games = data.get("games", None)
+        labels = data.get("moves", None) or data.get("best_moves", None) or data.get("win_probs", None)
+
+        assert games is not None, "You need to provide games to train on."
+        assert labels is not None, "You need to provide labels (best moves or win probabilities) to train on."
+        assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
+
+        if self._train_config["head"] == "all":
+            ...
+        elif self._train_config["head"] == "generative":
+            return self._train_on_generation(epochs, batch_size, games, labels, format="move")
+        elif self._train_config["head"] == "board_evaluation":
+            return self._train_board_evaluation(epochs, batch_size, games, labels, format="move")
+        elif self._train_config["head"] == "encoder":
+            ...
+        else:
+            raise ValueError(f"Invalid head: {self._train_config['head']}")
+        
+    def _train_on_generation(self, epochs: int, batch_size, games: list[Game], labels: Union[list[float], list[chess.Move]], format):
+
+        assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
+        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+        assert isinstance(labels[0], (int, chess.Move)), "'labels' should be a list of integers or instances of <chess.Move>."
+        assert format in ["float", "move"], "Invalid format for labels, should be either 'float' or 'move'."
+
+        if format == "move":
+            self._train_generation_moves(games, labels, epochs, batch_size)
+        else:
+            raise NotImplementedError("Training on generation with integer labels is not implemented yet.")
+
+    def _train_generation_moves(self, games: list[Game], best_moves: list[chess.Move], epochs: int, batch_size: int = 32):
+        """
+        """
+
+        assert batch_size > 1, "Batch size must be greater than 1."
+
+        # get moves dict (dict of all possible moves)
+        moves_dict = None
+        if os.path.exists("backend/data/moves_dict.pth"):
+            moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
+        elif os.path.exists(".data/moves_dict.pth"):
+            moves_dict = torch.load(".data/moves_dict.pth", weights_only=False)
+        else:
+            moves_dict = {} # 64*64*5
+            for i in range(64):
+                for j in range(64):
+                    # if i == j: continue: we keep total illegal move cuz we don't remove them in NN
+                    for k in range(5):
+                        # most of the time, promotion is not possible but we still considere the move, cuz easier
+                        
+                        moves_dict[(i, j, k)] = len(moves_dict)
+            torch.save(moves_dict, "backend/data/moves_dict.pth")
+
+        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.001)
+        criterion = nn.CrossEntropyLoss()
+        legal_criterion = nn.BCEWithLogitsLoss()
+
+        num_samples = len(games)
+        num_batches = (num_samples + batch_size - 1) // batch_size  # Ensure full coverage
+
+        all_total_loss = []
+        all_legal_loss = []
+        all_best_move_loss = []
+        all_contrastive_loss = []
+
+        for epoch in range(epochs):
+            total_loss, total_best_move_loss, total_legal_loss, total_contrastive_loss = 0, 0, 0, 0
+            indices = torch.randperm(num_samples)
+
+            for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
+
+                batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
+                batch_games = [games[i] for i in batch_indices]
+                batch_best_moves = [best_moves[i] for i in batch_indices]
+                batch_games_t = [game.reverse() for game in batch_games]
+                batch_best_moves_t = [Game.reverse_move(move) for move in batch_best_moves]
+
+                # predict the moves
+                predictions, embeddings = self.score_function(batch_games, head="generation") # [batch_size, 64*64*5]
+                predictions_t, embeddings_t = self.score_function(batch_games_t, head="generation")
+
+                targets = [moves_dict[self.encode_move(move)] for move in batch_best_moves]
+                targets = torch.tensor(targets, dtype=torch.long, device=self.score_function.device)
+
+                # Compute loss: 1 to increase the prob of the best move, 0 for the others
+                best_move_loss = criterion(predictions, targets)
+
+                # Compute a loss about legals move (1 if legal 0 if not)
+                legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]
+                legal_moves = [[1 if i in t else 0 for i in range(len(moves_dict))] for t in legal_moves]
+                legal_moves = torch.tensor(legal_moves, dtype=torch.float, device=self.score_function.device)
+                legal_loss = legal_criterion(predictions.float(), legal_moves.float())
+                num_legal_moves = legal_moves.sum(dim=1, keepdim=True).clamp(min=1)
+                legal_loss = (legal_loss / num_legal_moves).sum() * 0.01 # normalize by the number of legal moves
+
+                # Compute contrastive loss
+                contrastive_weight = 0.1 if epoch > 4 else 0 # warmup
+                contrastive_loss = self.embedding_contrastive_loss(embeddings, embeddings_t) * contrastive_weight
+
+                # Backpropagation
+                optimizer.zero_grad()
+                loss = best_move_loss + legal_loss + contrastive_loss
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item()
+                total_legal_loss += legal_loss.item()
+                total_best_move_loss += best_move_loss.item()
+                total_contrastive_loss += contrastive_loss.item()
+
+            all_total_loss.append(total_loss / num_batches)
+            all_legal_loss.append(total_legal_loss / num_batches)
+            all_best_move_loss.append(total_best_move_loss / num_batches)
+            all_contrastive_loss.append(total_contrastive_loss / num_batches)
+
+            if self._train_config["UI"] == 'prints':
+                l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Best Move Loss: {total_best_move_loss / num_batches:.2f}, Contrastive loss {total_contrastive_loss / num_batches:.2f}" 
+                l2 = f"  Legal Loss: {total_legal_loss / num_batches:.2f}"
+                l1 = Style("INFO", f"{l1: <{TrainConfig.line_length-2}}")
+                l2 = Style("INFO", f"{l2: <{TrainConfig.line_length-2}}")
+                print(f"| {l1} |")
+                print(f"| {l2} |")
+                print(f"| {'': <{TrainConfig.line_length-2}} |")
+
+            if self._train_config["auto_save"]:
+                if self.auto_save_version is None:
+                    files = [f for f in os.listdir("backend/models/saves") if self.__class__.__name__ in f and "auto-save" in f]
+                    self.auto_save_version = len(files)
+                self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
+
+        return all_total_loss, all_legal_loss, all_best_move_loss
     
+    def encode_move(self, move: chess.Move, as_int=False) -> Union[int, tuple]:
+        """
+        Encode a move to a tuple.
+        """
+
+        if as_int:
+            move_tuple = (move.from_square, move.to_square, DeepEngine.PROMOTION_TABLE[move.promotion])
+            moves_dict = None
+            if os.path.exists("backend/data/moves_dict.pth"):
+                moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
+            elif os.path.exists("data/moves_dict.pth"):
+                moves_dict = torch.load("data/moves_dict.pth", weights_only=False)
+            else:
+                raise FileNotFoundError("Moves dict not found.")
+            return moves_dict[move_tuple]
+
+        return move.from_square, move.to_square, DeepEngine.PROMOTION_TABLE[move.promotion]
+
+    def decode_move(self, move: Union[int, tuple]) -> chess.Move:
+        """
+        Decode a move from an integer or a tuple to a chess.Move object.
+        """
+        if isinstance(move, tuple): # (from, to, promotion)
+            reverse_promotion_table = {v: k for k, v in DeepEngine.PROMOTION_TABLE.items()}
+            return chess.Move(move[0], move[1], reverse_promotion_table[move[2]])
+        
+        # get move from dict
+        moves_dict = None
+        if os.path.exists("backend/data/moves_dict.pth"):
+            moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
+        elif os.path.exists("data/moves_dict.pth"):
+            moves_dict = torch.load("data/moves_dict.pth", weights_only=False)
+        else:
+            raise FileNotFoundError("Moves dict not found.")
+        
+        return self.decode_move(tuple(list(moves_dict.keys())[move]))
+
+    def _test_on_games(self, _plot=False, **data):
+        
+        games = data.get("games", None)
+        best_moves = data.get("best_moves", None) or data.get("moves", None)
+
+        assert games is not None, "You need to provide games to test on."
+        assert best_moves is not None, "You need to provide best moves to test on."
+
+        return self._test_generation(games, best_moves)
+
+    def _test_generation(self, games: list[Game], best_moves: list[chess.Move]):
+
+        assert len(games) == len(best_moves) > 0, "You need at least one game and one move per game."
+        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+        assert isinstance(best_moves[0], chess.Move), "'moves' should be a list of instances of <chess.Move>."
+
+        correct_predictions = 0
+        total_games = len(games)
+
+        moves_dict = None
+        if os.path.exists("backend/data/moves_dict.pth"):
+            moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
+        elif os.path.exists(".data/moves_dict.pth"):
+            moves_dict = torch.load(".data/moves_dict.pth", weights_only=False)
+        else:
+            # create moves dict
+            moves_dict = {}
+            for i in range(64):
+                for j in range(64):
+                    if i == j: continue
+                    for k in range(5):
+                        moves_dict[(i, j, k)] = len(moves_dict)
+            torch.save(moves_dict, "backend/data/moves_dict.pth")
+
+        self.score_function.eval()
+        with torch.no_grad():
+            predictions, _ = self.score_function(games, head="generation")
+            predictions = torch.argmax(predictions, dim=1)
+
+        for i, best_move in enumerate(best_moves):
+            predicted_move = self.decode_move(predictions[i].item())
+            correct_predictions += (predicted_move == best_move)
+
+        if self._train_config["UI"] == 'prints':
+            l = f"  Accuracy: {correct_predictions / total_games:.2f}"
+            l = Style("SECONDARY_INFO", f"{l: <{TrainConfig.line_length-2}}")
+            print(f"| {l} |")
+
+        return correct_predictions / total_games
+
     def embedding_contrastive_loss(self, emb_orig, emb_rev):
         """
-        Compute InfoNCE-style contrastive loss for embeddings from two views.
-        emb_orig, emb_rev: Tensors of shape [n, d] for n candidate moves.
-        For each candidate in emb_orig, its positive is the corresponding candidate in emb_rev,
-        and vice-versa.
+        Compute contrastive loss for embeddings from two views (original and reversed games).
+        emb_orig: Tensor of shape [batch_size, embed_dim]
+        emb_rev: Tensor of shape [batch_size, embed_dim]
         """
-        n = emb_orig.shape[0]
+        batch_size = emb_orig.shape[0]
         device = emb_orig.device
-        # Concatenate to get a [2*n, d] tensor.
-        features = torch.cat([emb_orig, emb_rev], dim=0)
-        features = F.normalize(features, dim=1)
+
+        # Normalize embeddings for cosine similarity
+        emb_orig = F.normalize(emb_orig, dim=1)  # [batch_size, embed_dim]
+        emb_rev = F.normalize(emb_rev, dim=1)  # [batch_size, embed_dim]
+
+        # Compute cosine similarity between all (orig, rev) pairs
+        similarity_matrix = torch.einsum("bd,cd->bc", emb_orig, emb_rev)  # [batch_size, batch_size]
+
+        # Use a learnable temperature parameter (default: 0.07)
+        if not hasattr(self, "temperature"):
+            self.temperature = nn.Parameter(torch.tensor(0.07, device=device))
         
-        # Compute cosine similarity matrix and scale by temperature.
-        temperature = self.temperature if hasattr(self, "temperature") else 0.1
-        logits = torch.matmul(features, features.T) / temperature  # Shape: [2*n, 2*n]
-        
-        # Mask out self-similarity by setting diagonal to a very low value.
-        mask = torch.eye(2 * n, dtype=torch.bool, device=device)
-        logits = logits.masked_fill(mask, -1e9)
-        
-        # For each sample i in 0..2*n-1, its positive pair is at index:
-        # i + n if i < n, else i - n.
-        labels = torch.cat([torch.arange(n, 2 * n), torch.arange(0, n)], dim=0).to(device)
-        
+        logits = similarity_matrix / self.temperature  # Scale by temperature
+
+        # Labels: Each sample i should match with sample i in rev (diagonal matches)
+        labels = torch.arange(batch_size, device=device)
+
+        # Compute contrastive loss (InfoNCE loss)
         loss = F.cross_entropy(logits, labels)
+
         return loss
 
     def test2(self, games: list[Game], best_moves: list[chess.Move]):
@@ -328,7 +560,7 @@ class DeepEngine(Engine):
         turns_t = []
 
         # Collect all positions and targets for batch inference
-        for game, best_move in tqdm.tqdm(zip(games, best_moves), desc=f"Testing {total_games} games", total=total_games):
+        for game, best_move in tqdm.tqdm(zip(games, best_moves), desc=f"| ", total=total_games, ncols=TrainConfig.line_length+2):
             legal_moves = list(game.board.legal_moves)
             if not legal_moves:
                 continue
@@ -378,24 +610,34 @@ class DeepEngine(Engine):
                 predicted_move = max(move_scores[game], key=move_scores[game].get)
                 correct_predictions += (predicted_move == best_move)
 
+        if self._train_config["UI"] == 'prints':
+            l = f"  Accuracy: {correct_predictions / total_games:.2f}"
+            l = Style("SECONDARY_INFO", f"{l: <{TrainConfig.line_length-2}}")
+            print(f"| {l} |")
+
         return correct_predictions / total_games
 
-    def __or__(self, other: TrainConfigBase) -> TrainConfig:
-        """Permet d'enchaîner les configurations avec `|` et retourne le bon type."""
-        return other.apply(self)
-
-    def train(self, **data):
-        """Exécute l'entraînement."""
-        mode = self._train_config["mode"]
-        head = self._train_config["head"]
-        print(f"🚀 Training in mode '{mode}' with head '{head}'...")
-        print("✨ Magic happens here ✨")
-
-    def test(self, _plot=False):
+    def _test_on_puzzles(self, _plot=False, **data):
         """Évaluation du modèle."""
-        print(f"📊 Evaluating... (plot={_plot})")
-        print("📈 Results generated.")
+       
+        games = data.get("games", None)
+        best_moves = data.get("best_moves", None) or data.get("moves", None)
 
+        assert games is not None, "You need to provide games to test on."
+        assert best_moves is not None, "You need to provide best moves to test on."
+
+        return self.test2(games, best_moves)
+
+    def predict(self, head="generation"):
+        """
+        Predict the best move for the current game.
+        """
+
+        scores, _ = self.score_function([self.game], head=head)
+        if head == "generation":
+            return scores.tolist()[0]
+        else:
+            return scores.tolist()[0]
 
 # Instances des configurations (corrige le problème de coloration syntaxique)
 all_heads = AllHeads()
@@ -429,6 +671,9 @@ class ScoreModel(nn.Module):
 
         self.classifier = DefaultClassifier()
         """torch.nn.Module: The classifier head of the model. Should return [batch_size, 2]. -> [black_win, white_win]"""
+
+        self.generative_head = DefaultGenerativeHead()
+        """torch.nn.Module: The generative head of the model. Should return [batch_size, 64*64*5]."""
 
         self.embedding = Embedding()
         """
@@ -471,12 +716,15 @@ class ScoreModel(nn.Module):
         return encoding
 
 
-    def forward(self, games: list[Game]) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, games: list[Game], head="win_probs") -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the score of a game for the given color.
 
         :param games: list of games
         :type games: list[Game]
+
+        :param head: head to use for the inference
+        :type head: str
 
         :return: score of the game
         :rtype: torch.Tensor of shape [batch_size, 2]
@@ -489,7 +737,13 @@ class ScoreModel(nn.Module):
         encoding = self.encode_games(one_hots, turns) # [batch_size, 8, 8, 14]
 
         embedding = self.embedding(encoding) # [batch_size, latent_dim]
-        scores = self.classifier(embedding) # [batch_size, 2]
+
+        if head == "win_probs":
+            scores = self.classifier(embedding)
+        elif head == "generation":
+            scores = self.generative_head(embedding)
+        else:
+            raise ValueError(f"Invalid head: {head}")
 
         return scores, embedding  
         

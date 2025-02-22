@@ -12,6 +12,9 @@ class Loader:
         """
         Load a .csv.zst or .pgn.zst file.
 
+        If you load a game from a PGN, all the moves will be loaded and pushed to the game.
+        If you load a puzzle from a CSV, only the first move will be loaded. 
+
         :param path: path to the file
         :type path: str
         :param dtype: type of the data to load (Game or Puzzle)
