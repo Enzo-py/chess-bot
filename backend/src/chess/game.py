@@ -101,6 +101,7 @@ class Game:
             Return a new instance of the game with the exact same position
         """
         cpy = Game().load(self.fen())
+        cpy.board = self.board.copy()
         cpy.white = self.white
         cpy.black = self.black
         cpy.ia_move_handler = self.ia_move_handler

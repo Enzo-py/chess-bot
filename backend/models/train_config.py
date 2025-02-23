@@ -39,7 +39,7 @@ class TrainConfig:
 
         # check if error
         if exc_type is not None:
-            msg = Style(None, f"An error occured: {exc_value}", auto_break=True, max_length=self.line_length-2).__str__()
+            msg = Style(None, f"An error occured: {exc_value.__str__()}", auto_break=True, max_length=self.line_length-2).__str__()
             lines = msg.split("\n")
             print("|" + "─"*self.line_length + "|")
             for line in lines:
@@ -65,8 +65,6 @@ class TrainConfig:
         undefined_config = []
         if self.engine._train_config["head"] is None:
             undefined_config.append("head")
-        if self.engine._train_config["mode"] is None:
-            undefined_config.append("mode")
         
         if len(undefined_config) > 0:
             raise TrainConfig.UndefinedConfigError(undefined_config)
@@ -75,14 +73,29 @@ class TrainConfig:
             line = ">> Start training for " + str(epochs) + " epochs"
             print(f"| {line: <{self.line_length-2}} |")
 
-        if self.engine._train_config["mode"] == "puzzles":
-            output = self.engine._train_on_puzzles(epochs=epochs, batch_size=batch_size, **data)
-        elif self.engine._train_config["mode"] == "games":
-            output = self.engine._train_on_games(epochs=epochs, batch_size=batch_size, **data)
-        else:
-            raise ValueError("Mode not unknown")
+        games = data.get("games")
+        labels = data.get("moves") or data.get("best_moves") or data.get("win_probs")
+        loader = data.get("loader")
+
+        if loader is None:
+            assert games is not None, "You need to provide games to train on."
+            assert labels is not None, "You need to provide labels (best moves or win probabilities) to train on."
+            assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
         
-        return output
+        self.engine.score_function.train()
+        if self.engine._train_config["head"] == "all":
+            ...
+        elif self.engine._train_config["head"] == "generative":
+            return self.engine._train_on_generation(epochs, batch_size, games, labels, loader=loader)
+        
+        elif self.engine._train_config["head"] == "board_evaluation":
+            return self.engine._train_board_evaluation(epochs, batch_size, games, labels, loader=loader)
+        
+        elif self.engine._train_config["head"] == "encoder":
+            return self.engine._train_encoder(epochs, batch_size, games, loader=loader)
+        
+        else:
+            raise ValueError(f"Invalid head: {self.engine._train_config['head']}")
         
 
     def test(self, _plot=False, **data):
@@ -91,8 +104,6 @@ class TrainConfig:
         undefined_config = []
         if self.engine._train_config["head"] is None:
             undefined_config.append("head")
-        if self.engine._train_config["mode"] is None:
-            undefined_config.append("mode")
 
         if len(undefined_config) > 0:
             raise TrainConfig.UndefinedConfigError(undefined_config)
@@ -101,16 +112,25 @@ class TrainConfig:
             line = ">> Start testing"
             print(f"| {line: <{self.line_length-2}} |")
 
-        if self.engine._train_config["mode"] == "puzzles":
-            output = self.engine._test_on_puzzles(_plot=_plot, **data)
+        games = data.get("games", None)
+        best_moves = data.get("best_moves", None) or data.get("moves", None)
+        loader = data.get("loader", None)
 
-        elif self.engine._train_config["mode"] == "games":
-            output = self.engine._test_on_games(_plot=_plot, **data)
+        if loader is None:
+            assert games is not None, "You need to provide games to test on."
+            assert best_moves is not None or self.engine._train_config["head"] == "encoder", "You need to provide best moves to test on."
 
+        self.engine.score_function.eval()
+        if self.engine._train_config["head"] == "all":
+            ...
+        elif self.engine._train_config["head"] == "generative":
+            return self.engine._test_generation(games, best_moves, loader=loader)
+        elif self.engine._train_config["head"] == "board_evaluation":
+            return self.engine.test2(games, best_moves, loader=loader)
+        elif self.engine._train_config["head"] == "encoder":
+            return self.engine._test_encoder(games, loader=loader)
         else:
-            raise ValueError("Mode not unknown")
-        
-        return output
+            raise ValueError(f"Invalid head: {self.engine._train_config['head']}")
 
     @property
     def print(self):

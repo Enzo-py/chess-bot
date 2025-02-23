@@ -1,10 +1,16 @@
 from functools import wraps
+import random
 from typing import Union
-from src.utils.console import Style
+
+from src.chess.puzzle import Puzzle
+from src.chess.loader import Loader
+from src.utils.console import Style, deprecated
 from src.chess.game import Game
 from models.engine import Engine
 from models.train_config import *
 from models.template import DefaultClassifier, DefaultDecoder, Embedding, DefaultGenerativeHead
+
+
 
 import chess
 import tqdm
@@ -142,28 +148,55 @@ class DeepEngine(Engine):
         elif element == "classifier":
             torch.save(self.score_function.classifier.state_dict(), path)
 
-    def _train_on_puzzles(self, epochs: int, batch_size, **data):
-        """
-        Train the model on puzzles.
-        """
-        games = data.get("games", None)
-        best_moves = data.get("moves", None) or data.get("best_moves", None)
+    def _exctract_data(self, loader: Loader, epoch: int, _for="train") -> tuple:
 
-        assert games is not None, "You need to provide games to train on."
-        assert best_moves is not None, "You need to provide best moves to train on."
-        self.score_function.train()
-        if self._train_config["head"] == "all":
-            ...
-        elif self._train_config["head"] == "generative":
-            ...
-        elif self._train_config["head"] == "board_evaluation":
-            return self._train_board_evaluation(epochs, batch_size, games, best_moves, format="move")
-        elif self._train_config["head"] == "encoder":
-            ...
-        else:
-            raise ValueError(f"Invalid head: {self._train_config['head']}")
-        
-    def _train_board_evaluation(self, epochs: int, batch_size, games: list[Game], labels: Union[list[int], list[chess.Move]], format):
+        assert _for in ["train", "test"], "Invalid value for '_for'. Must be 'train' or 'test'."
+        games, moves = [], []
+
+        if self._train_config["UI"] == "prints":
+            l = " > Updating data"
+            print(f"| {l: <{TrainConfig.line_length-2}} |")
+
+        for d in tqdm.tqdm(loader.get_update(epoch), ncols=TrainConfig.line_length+2, desc="| "):
+            if isinstance(d, Game):
+                if len(d.history) <= 3: continue
+
+                if _for == "train":
+                    for _ in range(len(d.history) - 2):
+                        d = d.copy()
+                        move = d.board.pop()
+                        games.append(d)
+                        moves.append(move)
+                else:
+                    d = d.copy()
+                    for _ in range(random.randint(1, len(d.history) - 2)):
+                        d.board.pop()
+                    
+                    move = d.board.pop()
+                    games.append(d)
+                    moves.append(move)
+
+            elif isinstance(d, Puzzle):
+                for _ in range(len(d.moves) - 1):
+                    if _for == "train":
+                        games.append(d.game)
+                        moves.append(d.moves[0])
+                        d.game = d.game.copy()
+                        d.game.move(d.moves[0])
+                        d.moves = d.moves[1:]
+                    else:
+                        games.append(d.game)
+                        moves.append(d.moves[0])
+
+            else:
+                raise ValueError("Invalid data type in loader.")
+            
+        if self._train_config["UI"] == "prints":
+            print("|" + " " * TrainConfig.line_length + "|")
+            
+        return games, moves
+
+    def _train_board_evaluation(self, epochs: int, batch_size, games: list[Game], moves: Union[list[int], list[chess.Move]], loader: Loader = None):
         """
         Train the model on the board evaluation head.
 
@@ -176,51 +209,25 @@ class DeepEngine(Engine):
         :param games: list of games
         :type games: list[Game]
 
-        :param labels: list of labels -> the list of int (0 black win, 1 white win) OR the list of best moves (1 per game)
-        :type labels: Union[list[int], list[chess.Move]]
+        :param moves: list of moves
+        :type labels: list[chess.Move]
 
-        :param format: format of the labels (either "int" or "move")
-        :type format: str
-        """
-
-        assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
-        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-        assert isinstance(labels[0], (int, chess.Move)), "'labels' should be a list of integers or instances of <chess.Move>."
-        assert format in ["int", "move"], "Invalid format for labels, should be either 'int' or 'move'."
-
-        if format == "move":
-            self._train_board_evaluation_puzzles(games, labels, epochs, batch_size)
-        else:
-            raise NotImplementedError("Training on board evaluation with integer labels is not implemented yet.")
-
-    def _train_board_evaluation_puzzles(self, games: list[Game], best_moves: list[chess.Move], epochs: int, batch_size: int = 32):
-        """
-        Train the model using batches instead of processing one element at a time.
-
-        :param games: list of games
-        :type games: list[Game]
-
-        :param best_moves: list of best moves
-        :type best_moves: list[chess.Move]
-
-        :param epochs: number of epochs
-        :type epochs: int
-
-        :param batch_size: size of the batch
-        :type batch_size: int
+        :param loader: loader to use to get the games
+        :type loader: Loader
 
         :return: total_loss, contrastive_loss, embedding_loss, classification_loss
         :rtype: tuple[list[float], list[float], list[float], list[float]]
         """
 
-        assert len(games) == len(best_moves) > 0, "You need at least one game to train, and one move per game."
-        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-        assert isinstance(best_moves[0], chess.Move), "'moves' should be a list of instances of <chess.Move>."
+        if loader is None:
+            assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
+            assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+            assert isinstance(labels[0], chess.Move), "'labels' should be a list of instances of <chess.Move>."
 
         optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
         criterion = nn.CrossEntropyLoss()
 
-        num_samples = len(games)
+        num_samples = len(games or [])
         num_batches = (num_samples + batch_size - 1) // batch_size  # Ensure full coverage
 
         all_total_loss = []
@@ -237,12 +244,19 @@ class DeepEngine(Engine):
             embedding_loss_total = 0
             classification_loss_total = 0
 
-            indices = torch.randperm(num_samples)  # Shuffle indices
+            if loader.need_update(epoch):
+                games, moves = self._exctract_data(loader, epoch)
+
+                num_samples = len(games)
+                num_batches = (num_samples + batch_size - 1) // batch_size
+
+            indices = torch.randperm(num_samples)
+
             for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
                 
                 batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
                 batch_games = [games[i] for i in batch_indices]
-                batch_best_moves = [best_moves[i] for i in batch_indices]
+                batch_best_moves = [moves[i] for i in batch_indices]
 
                 # Collect all positions and targets for the batch
                 for game, best_move in zip(batch_games, batch_best_moves):
@@ -320,17 +334,14 @@ class DeepEngine(Engine):
 
         return all_total_loss, all_contrastive_loss, all_embedding_loss, all_classification_loss
 
-    def _train_encoder(self, epochs: int, batch_size, games: list[Game]):
+    def _train_encoder(self, epochs: int, batch_size, games: list[Game], loader: Loader = None):
         """
         Train the model on the encoder head.
         """
 
-        assert len(games) > 0, "You need at least one game to train on."
-        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-
         optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
 
-        num_samples = len(games)
+        num_samples = len(games or [])
         num_batches = (num_samples + batch_size - 1) // batch_size
 
         all_total_loss = []
@@ -343,6 +354,12 @@ class DeepEngine(Engine):
             total_loss_one_hot = 0
             total_loss_turn = 0
             total_contrastive_loss = 0
+
+            if loader.need_update(epoch):
+                games, _ = self._exctract_data(loader, epoch)
+                num_samples = len(games)
+                num_batches = (num_samples + batch_size - 1) // batch_size
+
             indices = torch.randperm(num_samples)
 
             for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
@@ -397,47 +414,18 @@ class DeepEngine(Engine):
                 self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
 
         return all_total_loss
-
-    def _train_on_games(self, epochs: int, batch_size, **data):
-        """
-        Train the model on games.
-        """
-
-        games = data.get("games", None)
-        labels = data.get("moves", None) or data.get("best_moves", None) or data.get("win_probs", None)
-
-        assert games is not None, "You need to provide games to train on."
-        assert labels is not None, "You need to provide labels (best moves or win probabilities) to train on."
-        assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
-        self.score_function.train()
-        if self._train_config["head"] == "all":
-            ...
-        elif self._train_config["head"] == "generative":
-            return self._train_on_generation(epochs, batch_size, games, labels, format="move")
-        elif self._train_config["head"] == "board_evaluation":
-            return self._train_board_evaluation(epochs, batch_size, games, labels, format="move")
-        elif self._train_config["head"] == "encoder":
-            return self._train_encoder(epochs, batch_size, games)
-        else:
-            raise ValueError(f"Invalid head: {self._train_config['head']}")
         
-    def _train_on_generation(self, epochs: int, batch_size, games: list[Game], labels: Union[list[float], list[chess.Move]], format):
-
-        assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
-        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-        assert isinstance(labels[0], (int, chess.Move)), "'labels' should be a list of integers or instances of <chess.Move>."
-        assert format in ["float", "move"], "Invalid format for labels, should be either 'float' or 'move'."
-
-        if format == "move":
-            self._train_generation_moves(games, labels, epochs, batch_size)
-        else:
-            raise NotImplementedError("Training on generation with integer labels is not implemented yet.")
-
-    def _train_generation_moves(self, games: list[Game], best_moves: list[chess.Move], epochs: int, batch_size: int = 32):
-        """
-        """
+    def _train_on_generation(self, epochs: int, batch_size, games: list[Game], labels: Union[list[float], list[chess.Move]], loader: Loader = None):
+        
+        if loader is None:
+            assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
+            assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+            assert isinstance(labels[0], chess.Move), "'labels' should be a list of integers or instances of <chess.Move>."
 
         assert batch_size > 1, "Batch size must be greater than 1."
+
+        if loader is not None:
+            assert loader.window or 2 > 1, "Loader must have a window size greater than 1."
 
         # get moves dict (dict of all possible moves)
         moves_dict = None
@@ -460,7 +448,7 @@ class DeepEngine(Engine):
         criterion = nn.CrossEntropyLoss()
         legal_criterion = nn.BCEWithLogitsLoss()
 
-        num_samples = len(games)
+        num_samples = len(games or [])
         num_batches = (num_samples + batch_size - 1) // batch_size  # Ensure full coverage
 
         all_total_loss = []
@@ -470,6 +458,13 @@ class DeepEngine(Engine):
 
         for epoch in range(epochs):
             total_loss, total_best_move_loss, total_legal_loss, total_contrastive_loss = 0, 0, 0, 0
+
+            if loader.need_update(epoch):
+                games, best_moves = self._exctract_data(loader, epoch)
+
+                num_samples = len(games)
+                num_batches = (num_samples + batch_size - 1) // batch_size
+
             indices = torch.randperm(num_samples)
 
             for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
@@ -534,30 +529,11 @@ class DeepEngine(Engine):
                 self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
 
         return all_total_loss, all_legal_loss, all_best_move_loss
-    
-    def _test_on_games(self, _plot=False, **data):
-        
-        games = data.get("games", None)
-        best_moves = data.get("best_moves", None) or data.get("moves", None)
 
-        assert games is not None, "You need to provide games to test on."
-        assert best_moves is not None or self._train_config["head"] == "encoder", "You need to provide best moves to test on."
+    def _test_generation(self, games: list[Game], best_moves: list[chess.Move], loader: Loader = None):
 
-        self.score_function.eval()
-        if self._train_config["head"] == "all":
-            ...
-        elif self._train_config["head"] == "generative":
-            return self._test_generation(games, best_moves)
-        elif self._train_config["head"] == "board_evaluation":
-            return self.test2(games, best_moves)
-        elif self._train_config["head"] == "encoder":
-            return self._test_encoder(games)
-
-    def _test_generation(self, games: list[Game], best_moves: list[chess.Move]):
-
-        assert len(games) == len(best_moves) > 0, "You need at least one game and one move per game."
-        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-        assert isinstance(best_moves[0], chess.Move), "'moves' should be a list of instances of <chess.Move>."
+        if loader is not None:
+            games, best_moves = self._exctract_data(loader, 0, _for="test")
 
         correct_predictions = 0
         total_games = len(games)
@@ -593,10 +569,10 @@ class DeepEngine(Engine):
 
         return correct_predictions / total_games
 
-    def _test_encoder(self, games: list[Game]):
+    def _test_encoder(self, games: list[Game], loader: Loader = None):
         
-        assert len(games) > 0, "You need at least one game to test on."
-        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+        if loader is not None:
+            games, _ = self._exctract_data(loader, 0, _for="test")
 
         self.score_function.eval()
         with torch.no_grad():
@@ -653,6 +629,7 @@ class DeepEngine(Engine):
 
         return loss
 
+    @deprecated("Use the new train block instead. This method will be removed in the future and may not work properly.")
     def test2(self, games: list[Game], best_moves: list[chess.Move]):
         """
         Evaluate the model's accuracy in predicting the best move.
@@ -730,17 +707,6 @@ class DeepEngine(Engine):
 
         return correct_predictions / total_games
 
-    def _test_on_puzzles(self, _plot=False, **data):
-        """Évaluation du modèle."""
-       
-        games = data.get("games", None)
-        best_moves = data.get("best_moves", None) or data.get("moves", None)
-
-        assert games is not None, "You need to provide games to test on."
-        assert best_moves is not None, "You need to provide best moves to test on."
-
-        self.score_function.eval()
-        return self.test2(games, best_moves)
 
     def predict(self, head="generation"):
         """
