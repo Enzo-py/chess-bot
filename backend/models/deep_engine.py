@@ -4,7 +4,7 @@ from src.utils.console import Style
 from src.chess.game import Game
 from models.engine import Engine
 from models.train_config import *
-from models.template import DefaultClassifier, Embedding, DefaultGenerativeHead
+from models.template import DefaultClassifier, DefaultDecoder, Embedding, DefaultGenerativeHead
 
 import chess
 import tqdm
@@ -63,6 +63,42 @@ class DeepEngine(Engine):
         scores = [scores[self.encode_move(move, as_int=True)] for move in legal_moves]
         return legal_moves[scores.index(max(scores))]
 
+    def encode_move(self, move: chess.Move, as_int=False) -> Union[int, tuple]:
+        """
+        Encode a move to a tuple.
+        """
+
+        if as_int:
+            move_tuple = (move.from_square, move.to_square, DeepEngine.PROMOTION_TABLE[move.promotion])
+            moves_dict = None
+            if os.path.exists("backend/data/moves_dict.pth"):
+                moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
+            elif os.path.exists("data/moves_dict.pth"):
+                moves_dict = torch.load("data/moves_dict.pth", weights_only=False)
+            else:
+                raise FileNotFoundError("Moves dict not found.")
+            return moves_dict[move_tuple]
+
+        return move.from_square, move.to_square, DeepEngine.PROMOTION_TABLE[move.promotion]
+
+    def decode_move(self, move: Union[int, tuple]) -> chess.Move:
+        """
+        Decode a move from an integer or a tuple to a chess.Move object.
+        """
+        if isinstance(move, tuple): # (from, to, promotion)
+            reverse_promotion_table = {v: k for k, v in DeepEngine.PROMOTION_TABLE.items()}
+            return chess.Move(move[0], move[1], reverse_promotion_table[move[2]])
+        
+        # get move from dict
+        moves_dict = None
+        if os.path.exists("backend/data/moves_dict.pth"):
+            moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
+        elif os.path.exists("data/moves_dict.pth"):
+            moves_dict = torch.load("data/moves_dict.pth", weights_only=False)
+        else:
+            raise FileNotFoundError("Moves dict not found.")
+        
+        return self.decode_move(tuple(list(moves_dict.keys())[move]))
     
     def load(self, path: str=None, element: str="all"):
         """
@@ -78,11 +114,11 @@ class DeepEngine(Engine):
                     raise FileNotFoundError(f"Model not found at {path}")
 
         if element == "all":
-            self.score_function.load_state_dict(torch.load(path, weights_only=True))
+            self.score_function.load_state_dict(torch.load(path, weights_only=True, map_location=self.score_function.device), strict=False)
         elif element == "embedding":
-            self.score_function.embedding.load_state_dict(torch.load(path, weights_only=True))
+            self.score_function.embedding.load_state_dict(torch.load(path, weights_only=True, map_location=self.score_function.device), strict=False)
         elif element == "classifier":
-            self.score_function.classifier.load_state_dict(torch.load(path, weights_only=True))
+            self.score_function.classifier.load_state_dict(torch.load(path, weights_only=True, map_location=self.score_function.device), strict=False)
 
     def save(self, path: str=None, element: str="all"):
         """
@@ -115,7 +151,7 @@ class DeepEngine(Engine):
 
         assert games is not None, "You need to provide games to train on."
         assert best_moves is not None, "You need to provide best moves to train on."
-
+        self.score_function.train()
         if self._train_config["head"] == "all":
             ...
         elif self._train_config["head"] == "generative":
@@ -181,9 +217,7 @@ class DeepEngine(Engine):
         assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
         assert isinstance(best_moves[0], chess.Move), "'moves' should be a list of instances of <chess.Move>."
 
-        # classifier_optimizer = torch.optim.Adam(self.score_function.classifier.parameters(), lr=0.001)
-        # embedding_optimizer = torch.optim.Adam(self.score_function.embedding.parameters(), lr=0.0005)  # Lower LR
-        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
         criterion = nn.CrossEntropyLoss()
 
         num_samples = len(games)
@@ -286,6 +320,84 @@ class DeepEngine(Engine):
 
         return all_total_loss, all_contrastive_loss, all_embedding_loss, all_classification_loss
 
+    def _train_encoder(self, epochs: int, batch_size, games: list[Game]):
+        """
+        Train the model on the encoder head.
+        """
+
+        assert len(games) > 0, "You need at least one game to train on."
+        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+
+        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
+
+        num_samples = len(games)
+        num_batches = (num_samples + batch_size - 1) // batch_size
+
+        all_total_loss = []
+        all_total_loss_one_hot = []
+        all_total_loss_turn = []
+        all_total_contrastive_loss = []
+
+        for epoch in range(epochs):
+            total_loss = 0
+            total_loss_one_hot = 0
+            total_loss_turn = 0
+            total_contrastive_loss = 0
+            indices = torch.randperm(num_samples)
+
+            for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
+
+                batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
+                batch_games = [games[i] for i in batch_indices]
+                batch_games_t = [game.reverse() for game in batch_games]
+
+                # predict the moves
+                one_hot, turns, decoded_one_hot, decoded_turns, latent = self.score_function(batch_games, head="encoder")
+                _, _, _, _, latent_t = self.score_function(batch_games_t, head="encoder")
+
+                # flatten the one_hot 
+                one_hot = one_hot.view(one_hot.shape[0], -1)
+                decoded_one_hot = decoded_one_hot.view(decoded_one_hot.shape[0], -1)
+
+                # Compute loss
+                loss_one_hot = F.binary_cross_entropy_with_logits(decoded_one_hot, one_hot) 
+                loss_turn = F.binary_cross_entropy_with_logits(decoded_turns, turns)
+                contrastive_loss = self.embedding_contrastive_loss(latent, latent_t)
+
+                loss = loss_one_hot + loss_turn + contrastive_loss * 0.15
+
+                # Backpropagation
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item()
+                total_loss_one_hot += loss_one_hot.item()
+                total_loss_turn += loss_turn.item()
+                total_contrastive_loss += contrastive_loss.item()
+
+            all_total_loss.append(total_loss / num_batches)
+            all_total_loss_one_hot.append(total_loss_one_hot / num_batches)
+            all_total_loss_turn.append(total_loss_turn / num_batches)
+            all_total_contrastive_loss.append(total_contrastive_loss / num_batches)
+
+            if self._train_config["UI"] == 'prints':
+                l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, One-Hot Loss: {total_loss_one_hot / num_batches:.2f}, Turn Loss: {total_loss_turn / num_batches:.2f}"
+                l2 = f"  Contrastive Loss: {total_contrastive_loss / num_batches:.2f}"
+                l1 = Style("INFO", f"{l1: <{TrainConfig.line_length-2}}")
+                l2 = Style("INFO", f"{l2: <{TrainConfig.line_length-2}}")
+                print(f"| {l1} |")
+                print(f"| {l2} |")
+                print(f"| {'': <{TrainConfig.line_length-2}} |")
+
+            if self._train_config["auto_save"]:
+                if self.auto_save_version is None:
+                    files = [f for f in os.listdir("backend/models/saves") if self.__class__.__name__ in f and "auto-save" in f]
+                    self.auto_save_version = len(files)
+                self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
+
+        return all_total_loss
+
     def _train_on_games(self, epochs: int, batch_size, **data):
         """
         Train the model on games.
@@ -297,7 +409,7 @@ class DeepEngine(Engine):
         assert games is not None, "You need to provide games to train on."
         assert labels is not None, "You need to provide labels (best moves or win probabilities) to train on."
         assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
-
+        self.score_function.train()
         if self._train_config["head"] == "all":
             ...
         elif self._train_config["head"] == "generative":
@@ -305,7 +417,7 @@ class DeepEngine(Engine):
         elif self._train_config["head"] == "board_evaluation":
             return self._train_board_evaluation(epochs, batch_size, games, labels, format="move")
         elif self._train_config["head"] == "encoder":
-            ...
+            return self._train_encoder(epochs, batch_size, games)
         else:
             raise ValueError(f"Invalid head: {self._train_config['head']}")
         
@@ -344,7 +456,7 @@ class DeepEngine(Engine):
                         moves_dict[(i, j, k)] = len(moves_dict)
             torch.save(moves_dict, "backend/data/moves_dict.pth")
 
-        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
         criterion = nn.CrossEntropyLoss()
         legal_criterion = nn.BCEWithLogitsLoss()
 
@@ -423,52 +535,23 @@ class DeepEngine(Engine):
 
         return all_total_loss, all_legal_loss, all_best_move_loss
     
-    def encode_move(self, move: chess.Move, as_int=False) -> Union[int, tuple]:
-        """
-        Encode a move to a tuple.
-        """
-
-        if as_int:
-            move_tuple = (move.from_square, move.to_square, DeepEngine.PROMOTION_TABLE[move.promotion])
-            moves_dict = None
-            if os.path.exists("backend/data/moves_dict.pth"):
-                moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
-            elif os.path.exists("data/moves_dict.pth"):
-                moves_dict = torch.load("data/moves_dict.pth", weights_only=False)
-            else:
-                raise FileNotFoundError("Moves dict not found.")
-            return moves_dict[move_tuple]
-
-        return move.from_square, move.to_square, DeepEngine.PROMOTION_TABLE[move.promotion]
-
-    def decode_move(self, move: Union[int, tuple]) -> chess.Move:
-        """
-        Decode a move from an integer or a tuple to a chess.Move object.
-        """
-        if isinstance(move, tuple): # (from, to, promotion)
-            reverse_promotion_table = {v: k for k, v in DeepEngine.PROMOTION_TABLE.items()}
-            return chess.Move(move[0], move[1], reverse_promotion_table[move[2]])
-        
-        # get move from dict
-        moves_dict = None
-        if os.path.exists("backend/data/moves_dict.pth"):
-            moves_dict = torch.load("backend/data/moves_dict.pth", weights_only=False)
-        elif os.path.exists("data/moves_dict.pth"):
-            moves_dict = torch.load("data/moves_dict.pth", weights_only=False)
-        else:
-            raise FileNotFoundError("Moves dict not found.")
-        
-        return self.decode_move(tuple(list(moves_dict.keys())[move]))
-
     def _test_on_games(self, _plot=False, **data):
         
         games = data.get("games", None)
         best_moves = data.get("best_moves", None) or data.get("moves", None)
 
         assert games is not None, "You need to provide games to test on."
-        assert best_moves is not None, "You need to provide best moves to test on."
+        assert best_moves is not None or self._train_config["head"] == "encoder", "You need to provide best moves to test on."
 
-        return self._test_generation(games, best_moves)
+        self.score_function.eval()
+        if self._train_config["head"] == "all":
+            ...
+        elif self._train_config["head"] == "generative":
+            return self._test_generation(games, best_moves)
+        elif self._train_config["head"] == "board_evaluation":
+            return self.test2(games, best_moves)
+        elif self._train_config["head"] == "encoder":
+            return self._test_encoder(games)
 
     def _test_generation(self, games: list[Game], best_moves: list[chess.Move]):
 
@@ -509,6 +592,36 @@ class DeepEngine(Engine):
             print(f"| {l} |")
 
         return correct_predictions / total_games
+
+    def _test_encoder(self, games: list[Game]):
+        
+        assert len(games) > 0, "You need at least one game to test on."
+        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
+
+        self.score_function.eval()
+        with torch.no_grad():
+            one_hot, turns, decoded_one_hot, decoded_turns, _ = self.score_function(games, head="encoder")
+
+        # Compute accuracy
+        correct_predictions = 0
+
+        for i, game in enumerate(games):
+            # 1. flatten the one_hot
+            one_hot_i = one_hot[i].view(-1)
+            decoded_one_hot_i = decoded_one_hot[i].view(-1)
+            decoded_one_hot_i = torch.round(decoded_one_hot_i)
+
+            # 2. compare the one_hot and the decoded_one_hot
+            correct_predictions += (one_hot_i == decoded_one_hot_i).sum().item()
+            correct_predictions += (turns[i] == decoded_turns[i]).sum().item()
+
+            # 3. normalize 8*8*12 + 1
+            correct_predictions /= 8*8*12 + 1
+
+        if self._train_config["UI"] == 'prints':
+            l = f"  Accuracy: {correct_predictions / len(games):.2f}"
+            l = Style("SECONDARY_INFO", f"{l: <{TrainConfig.line_length-2}}")
+            print(f"| {l} |")
 
     def embedding_contrastive_loss(self, emb_orig, emb_rev):
         """
@@ -626,6 +739,7 @@ class DeepEngine(Engine):
         assert games is not None, "You need to provide games to test on."
         assert best_moves is not None, "You need to provide best moves to test on."
 
+        self.score_function.eval()
         return self.test2(games, best_moves)
 
     def predict(self, head="generation"):
@@ -681,6 +795,9 @@ class ScoreModel(nn.Module):
             Should return [batch_size, latent_dim].
             Take in input [batch_size, 8, 8, 14] (one-hot encoding of the game + turn projection)
         """
+
+        self.decoder = DefaultDecoder()
+        """torch.nn.Module: The decoder head of the model. Should return [batch_size, 8, 8, 12]."""
 
         self.turn_projection = nn.Linear(1, 8*8)
 
@@ -742,6 +859,9 @@ class ScoreModel(nn.Module):
             scores = self.classifier(embedding)
         elif head == "generation":
             scores = self.generative_head(embedding)
+        elif head == "encoder":
+            decoded_one_hots, decoded_turns = self.decoder(embedding)
+            return one_hots, turns, decoded_one_hots, decoded_turns, embedding
         else:
             raise ValueError(f"Invalid head: {head}")
 

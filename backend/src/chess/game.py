@@ -215,9 +215,9 @@ class Game:
         if self.ia_move_handler is not None: self.ia_move_handler(move)
 
     def one_hot(self):
-        """ Converts the chess board to a 8x8x13 one-hot encoded representation. """
+        """ Converts the chess board to a 8x8x12 one-hot encoded representation. """
 
-        board_matrix = np.zeros((8, 8, 13), dtype=int)
+        board_matrix = np.zeros((8, 8, 12), dtype=int)
         board_str = str(self.board).replace("\n", " ").split()
 
         for i in range(8):

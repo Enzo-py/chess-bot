@@ -47,19 +47,21 @@ class DefaultDecoder(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.fc1 = nn.Linear(256, 1024)
+        self.fc1 = nn.Linear(768, 1024)
+        self.fc2 = nn.Linear(1024, 1024)
         self.fc_board = nn.Linear(1024, 8*8*12)
         
-        self.fc_turn = nn.Linear(256, 1)
+        self.fc_turn = nn.Linear(1024, 1)
 
     def forward(self, x):
         """
         x: [batch_size, 256]
         """
 
-        x_board = F.relu(self.fc1(x))
-        x_board = self.fc_board(x_board)
-        x_board = x_board.view(-1, 8, 8, 13)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x_board = self.fc_board(x)
+        x_board = x_board.view(-1, 8, 8, 12)
 
         x_turn = self.fc_turn(x)
         return x_board, x_turn

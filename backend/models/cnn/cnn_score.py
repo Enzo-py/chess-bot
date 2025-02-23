@@ -81,7 +81,7 @@ class ScoreClassifier(nn.Module):
 class ChessEmbedding(nn.Module):
     def __init__(self):
         super().__init__()
-        self.resn1 = ResBlock(14, 64, 128, 3, 1, 1, attention=False)  # (batch, 128, 8, 8)
+        self.resn1 = ResBlock(13, 64, 128, 3, 1, 1, attention=False)  # (batch, 128, 8, 8)
         self.resn2 = ResBlock(128, 128, 256, 6, 1, 2)  # (batch, 256, 8, 8)
         self.resn3 = ResBlock(256, 256, 512, 3, 2, 1)  # (batch, 512, 4, 4)
         self.resn4 = ResBlock(512, 512, 512, 3, 1, 1)  # (batch, 512, 4, 4)
@@ -145,7 +145,7 @@ class ChessEmbedding(nn.Module):
 class HeatMap(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(14, 64, 3, 1, 1)  # Output: (batch, 64, 8, 8)
+        self.conv1 = nn.Conv2d(13, 64, 3, 1, 1)  # Output: (batch, 64, 8, 8)
         # We'll manually pad before conv2 to simulate "same" padding for a 6x6 kernel.
         # For an input of size 8, kernel=6, stride=1, the total padding needed is k - 1 = 5.
         # We'll pad left=2, right=3, top=2, bottom=3.
@@ -154,7 +154,7 @@ class HeatMap(nn.Module):
         self.conv3 = nn.Conv2d(64, 32, 5, 1, 2)  # Output: (batch, 32, 8, 8) with kernel=5, padding=2
         self.conv4 = nn.Conv2d(32, 1, 3, 1, 1)   # Output: (batch, 1, 8, 8)
         
-        self.res_connection = nn.Conv2d(14, 64, 3, 1, 1)  # Ensures (batch, 64, 8, 8)
+        self.res_connection = nn.Conv2d(13, 64, 3, 1, 1)  # Ensures (batch, 64, 8, 8)
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 

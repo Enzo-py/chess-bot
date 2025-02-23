@@ -23,9 +23,9 @@ if __name__ == "__main__":
     model = CNNScore()
     # model.load("backend/models/saves/CNNScore.active.pth")
     
-    nb_batches = 1
-    batch_size = 2
-    epochs = 8
+    nb_batches = 4
+    batch_size = 16
+    epochs = 12
     test_size = 10
 
     games: list[Game] = []
@@ -78,7 +78,7 @@ if __name__ == "__main__":
                 games_test.append(game)
                 moves_test.append(move)
                         
-    with model | generative_head | on_games | with_prints | auto_save as env:
+    with model | encoder_head | on_games | with_prints | auto_save as env:
         env.train(epochs=epochs, batch_size=batch_size, games=games_train, moves=moves_train)
         env.test(games=games_test, moves=moves_test)
 
