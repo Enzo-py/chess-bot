@@ -76,7 +76,7 @@ class Puzzle:
         self.moves = self.moves[1:]
 
         self.game.checkmate = None if not self.game.board.is_checkmate() else (chess.WHITE if self.game.board.turn == chess.BLACK else chess.BLACK)
-        self.game.draw = None if not (self.game.board.is_stalemate() or self.game.board.is_insufficient_material()) or self.game.board.is_checkmate() else True # draw, not self.game format, but easier for learning
+        self.game.draw = (self.game.board.is_stalemate() or self.game.board.is_insufficient_material()) and not self.game.board.is_checkmate() 
         self.game.king_in_check = {chess.WHITE: self.game.board.is_check() and self.game.board.turn == chess.WHITE, chess.BLACK: self.game.board.is_check() and self.game.board.turn == chess.BLACK}
         self.game.last_player = chess.WHITE if self.game.board.turn == chess.BLACK else chess.BLACK
 

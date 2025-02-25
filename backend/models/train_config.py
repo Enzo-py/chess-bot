@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from src.utils.console import Style
 
-__all__ = ["TrainConfig", "TrainConfigBase", "AllHeads", "GenerativeHead", "BoardEvaluationHead", "EncoderHead", "OnPuzzles", "OnGames", "WithPrints", "AutoSave"]
+__all__ = ["TrainConfig", "TrainConfigBase", "AllHeads", "GenerativeHead", "BoardEvaluationHead", "EncoderHead", "WithPrints", "AutoSave"]
 
 class TrainConfig:
     """Configuration de l'entraînement via `|`."""
@@ -52,6 +52,11 @@ class TrainConfig:
             print("|" + "─"*self.line_length + "|")
             print(f"| {line: <{self.line_length-3}} |")
             print("╰" + "─"*self.line_length + "╯")
+
+        # remove config from engine
+        self.engine._train_config["head"] = None
+        self.engine._train_config["mode"] = None
+        self.engine._train_config["UI"] = None
 
     def __or__(self, value: 'TrainConfigBase') -> 'TrainConfig':
         """Applique une configuration."""
@@ -126,7 +131,7 @@ class TrainConfig:
         elif self.engine._train_config["head"] == "generative":
             return self.engine._test_generation(games, best_moves, loader=loader)
         elif self.engine._train_config["head"] == "board_evaluation":
-            return self.engine.test2(games, best_moves, loader=loader)
+            return self.engine._test_board_evaluation(games, best_moves, loader=loader)
         elif self.engine._train_config["head"] == "encoder":
             return self.engine._test_encoder(games, loader=loader)
         else:
@@ -192,26 +197,6 @@ class EncoderHead(TrainConfigBase):
             raise TrainConfigBase.OverwriteError(f"<head={engine._train_config['head']}>")
         
         engine._train_config["head"] = "encoder"
-        return TrainConfig(engine)
-
-class OnPuzzles(TrainConfigBase):
-    """Configuration pour entraîner sur les puzzles."""
-
-    def apply(self, engine) -> TrainConfig:
-        if engine._train_config["mode"] is not None:
-            raise TrainConfigBase.OverwriteError(f"<mode={engine._train_config['mode']}>")
-        
-        engine._train_config["mode"] = "puzzles"
-        return TrainConfig(engine)
-
-class OnGames(TrainConfigBase):
-    """Configuration pour entraîner sur les parties complètes."""
-
-    def apply(self, engine) -> TrainConfig:
-        if engine._train_config["mode"] is not None:
-            raise TrainConfigBase.OverwriteError(f"<mode={engine._train_config['mode']}>")
-        
-        engine._train_config["mode"] = "games"
         return TrainConfig(engine)
 
 class WithPrints(TrainConfigBase):

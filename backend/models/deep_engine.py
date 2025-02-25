@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["DeepEngine", "all_heads", "on_puzzles", "on_games", "generative_head", "board_evaluation_head", "encoder_head", "with_prints", "auto_save"]
+__all__ = ["DeepEngine", "all_heads", "generative_head", "board_evaluation_head", "encoder_head", "with_prints", "auto_save"]
 
 class DeepEngine(Engine):
     """
@@ -161,6 +161,16 @@ class DeepEngine(Engine):
             if isinstance(d, Game):
                 if len(d.history) <= 3: continue
 
+                if self._train_config["head"] == "board_evaluation":
+                    probs = (0.5, 0.5) if d.draw else (1, 0) if d.winner == chess.WHITE else (0, 1)
+                    for _ in range(len(d.history) - 2):
+                        d = d.copy()
+                        move = d.board.pop()
+                        games.append(d)
+                        moves.append(probs)
+                    
+                    continue
+
                 if _for == "train":
                     for _ in range(len(d.history) - 2):
                         d = d.copy()
@@ -177,6 +187,23 @@ class DeepEngine(Engine):
                     moves.append(move)
 
             elif isinstance(d, Puzzle):
+                if len(d.moves) <= 1: continue
+
+                if self._train_config["head"] == "board_evaluation":
+                    probs = (0.5, 0.5) if d.game.draw else (1, 0) if d.game.winner == chess.WHITE else (0, 1)
+                    for _ in range(len(d.moves) - 1):
+                        if _for == "train":
+                            games.append(d.game)
+                            moves.append(probs)
+                            d.game = d.game.copy()
+                            d.game.move(d.moves[0])
+                            d.moves = d.moves[1:]
+                        else:
+                            games.append(d.game)
+                            moves.append(probs)
+
+                    continue
+
                 for _ in range(len(d.moves) - 1):
                     if _for == "train":
                         games.append(d.game)
@@ -196,9 +223,10 @@ class DeepEngine(Engine):
             
         return games, moves
 
-    def _train_board_evaluation(self, epochs: int, batch_size, games: list[Game], moves: Union[list[int], list[chess.Move]], loader: Loader = None):
+    def _train_board_evaluation(self, epochs: int, batch_size, games: list[Game], win_probs: list[tuple[float, float]], loader: Loader = None):
         """
-        Train the model on the board evaluation head.
+        Train the model on the board evaluation head: predict the win probability.
+        [black_win, white_win]
 
         :param epochs: number of epochs
         :type epochs: int
@@ -209,8 +237,8 @@ class DeepEngine(Engine):
         :param games: list of games
         :type games: list[Game]
 
-        :param moves: list of moves
-        :type labels: list[chess.Move]
+        :param win_probs: list of tuples (black_win_prob, white_win_prob)
+        :type win_probs: list[tuple[float, float]]
 
         :param loader: loader to use to get the games
         :type loader: Loader
@@ -220,12 +248,11 @@ class DeepEngine(Engine):
         """
 
         if loader is None:
-            assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
+            assert len(games) == len(win_probs) > 0, "You need at least one game to train, and one label per game."
             assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-            assert isinstance(labels[0], chess.Move), "'labels' should be a list of instances of <chess.Move>."
+            assert isinstance(win_probs[0], tuple), "'win_probs' should be a list of tuples."
 
         optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
-        criterion = nn.CrossEntropyLoss()
 
         num_samples = len(games or [])
         num_batches = (num_samples + batch_size - 1) // batch_size  # Ensure full coverage
@@ -235,17 +262,14 @@ class DeepEngine(Engine):
         all_embedding_loss = []
         all_classification_loss = []
 
-        # if self._train_config["UI"] == 'prints':
-        #     print(f"\t {num_batches} batches of {batch_size} games of x moves each.")
-
         for epoch in range(epochs):
             total_loss = 0
             contrastive_loss_total = 0
             embedding_loss_total = 0
             classification_loss_total = 0
 
-            if loader.need_update(epoch):
-                games, moves = self._exctract_data(loader, epoch)
+            if loader and loader.need_update(epoch):
+                games, win_probs = self._exctract_data(loader, epoch)
 
                 num_samples = len(games)
                 num_batches = (num_samples + batch_size - 1) // batch_size
@@ -256,67 +280,35 @@ class DeepEngine(Engine):
                 
                 batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
                 batch_games = [games[i] for i in batch_indices]
-                batch_best_moves = [moves[i] for i in batch_indices]
+                batch_win_probs = torch.tensor([win_probs[i] for i in batch_indices], dtype=torch.float32, device=self.score_function.device)
 
-                # Collect all positions and targets for the batch
-                for game, best_move in zip(batch_games, batch_best_moves):
-                    legal_moves = list(game.board.legal_moves)
-                    if not legal_moves:
-                        continue
+                batch_games_t = [game.reverse() for game in batch_games]
 
-                    game_t = game.reverse()
-                    game_positions = []
-                    game_positions_t = []
+                # Predict the probabilities
+                probs, embeddings = self.score_function(batch_games, head="board_evaluation")
+                probs_t, embeddings_t = self.score_function(batch_games_t, head="board_evaluation")
 
-                    targets = []
-                    turns = []
-                    turns_t = []
+                # Compute classification loss (Binary Cross Entropy)
+                classification_loss = F.binary_cross_entropy(probs, batch_win_probs)
 
-                    for move in legal_moves:
-                        game.board.push(move)
-                        game_positions.append(game.copy())
-                        turns.append(game.board.turn)
-                        game.board.pop()
+                # Compute contrastive loss (make embeddings for original and flipped boards similar)
+                contrastive_loss = self.embedding_contrastive_loss(embeddings, embeddings_t)
 
-                        targets.append(move == best_move)
+                # Compute embedding loss (optional: regularization for stable embeddings)
+                embedding_loss = torch.mean(torch.norm(embeddings, dim=-1))  # L2 norm regularization
 
-                    for move in game_t.board.legal_moves:
-                        game_t.board.push(move)
-                        game_positions_t.append(game_t.copy())
-                        turns_t.append(game_t.board.turn)
-                        game_t.board.pop()
+                # Total loss
+                loss = classification_loss + 0.15 * contrastive_loss + 0.01 * embedding_loss
 
-                    if not game_positions: continue
+                # Backpropagation
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-                    # model inference (per game: slow but allow crossentropy loss)
-                    self.score_function.train()
-                    scores, embeddings = self.score_function(game_positions)
-                    scores_t, embeddings_t = self.score_function(game_positions_t)
-
-                    # Extract scores dynamically based on the tracked player turns
-                    turns_tensor = torch.tensor(turns, dtype=torch.long, device=self.score_function.device)
-                    turns_t_tensor = torch.tensor(turns_t, dtype=torch.long, device=self.score_function.device)
-                    scores = scores.gather(1, turns_tensor.view(-1, 1)).squeeze(1)  # Extract correct player's score
-                    scores_t = scores_t.gather(1, turns_t_tensor.view(-1, 1)).squeeze(1)
-
-                    # Convert to tensors
-                    targets_tensor = torch.tensor(targets, dtype=torch.float, device=self.score_function.device)
-
-                    # **Loss Computation**
-                    classification_loss = criterion(scores, targets_tensor)
-                    contrastive_loss = F.mse_loss(scores, scores_t)
-                    embedding_loss = self.embedding_contrastive_loss(embeddings, embeddings_t)
-
-                    # **Backpropagation**
-                    optimizer.zero_grad()
-                    loss = contrastive_loss + embedding_loss + classification_loss
-                    loss.backward()
-                    optimizer.step()
-
-                    total_loss += loss.item()
-                    contrastive_loss_total += contrastive_loss.item()
-                    embedding_loss_total += embedding_loss.item()
-                    classification_loss_total += classification_loss.item()
+                total_loss += loss.item()
+                contrastive_loss_total += contrastive_loss.item()
+                embedding_loss_total += embedding_loss.item()
+                classification_loss_total += classification_loss.item()
 
             all_total_loss.append(total_loss / num_batches)
             all_contrastive_loss.append(contrastive_loss_total / num_batches)
@@ -599,6 +591,27 @@ class DeepEngine(Engine):
             l = Style("SECONDARY_INFO", f"{l: <{TrainConfig.line_length-2}}")
             print(f"| {l} |")
 
+    def _test_board_evaluation(self, games: list[Game], win_probs: list[tuple[float, float]], loader: Loader = None):
+        
+        if loader is not None:
+            games, win_probs = self._exctract_data(loader, 0, _for="test")
+
+        self.score_function.eval()
+        with torch.no_grad():
+            probs, _ = self.score_function(games, head="board_evaluation")
+            probs = torch.round(probs)
+
+        # Compute accuracy
+        correct_predictions = 0
+
+        for i, game in enumerate(games):
+            correct_predictions += (probs[i] == torch.tensor(win_probs[i], device=self.score_function.device)).all().item()
+
+        if self._train_config["UI"] == 'prints':
+            l = f"  Accuracy: {correct_predictions / len(games):.2f}"
+            l = Style("SECONDARY_INFO", f"{l: <{TrainConfig.line_length-2}}")
+            print(f"| {l} |")
+
     def embedding_contrastive_loss(self, emb_orig, emb_rev):
         """
         Compute contrastive loss for embeddings from two views (original and reversed games).
@@ -629,84 +642,6 @@ class DeepEngine(Engine):
 
         return loss
 
-    @deprecated("Use the new train block instead. This method will be removed in the future and may not work properly.")
-    def test2(self, games: list[Game], best_moves: list[chess.Move]):
-        """
-        Evaluate the model's accuracy in predicting the best move.
-        """
-        
-        assert len(games) == len(best_moves) > 0, "You need at least one game and one move per game."
-        assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-        assert isinstance(best_moves[0], chess.Move), "'moves' should be a list of instances of <chess.Move>."
-
-        correct_predictions = 0
-        total_games = len(games)
-
-        all_moves = []
-        all_game_positions = []
-        all_game_positions_t = []
-        best_moves_dict = {}
-        turns = []
-        turns_t = []
-
-        # Collect all positions and targets for batch inference
-        for game, best_move in tqdm.tqdm(zip(games, best_moves), desc=f"| ", total=total_games, ncols=TrainConfig.line_length+2):
-            legal_moves = list(game.board.legal_moves)
-            if not legal_moves:
-                continue
-            
-            best_moves_dict[game] = best_move
-            game_t = game.reverse()
-
-            for move in legal_moves:
-                game.board.push(move)
-                all_game_positions.append(game.copy())
-                turns.append(game.board.turn)
-                game.board.pop()
-
-                all_moves.append((game, move))  # Keep track of which move belongs to which game
-
-            for move in game_t.board.legal_moves:
-                game_t.board.push(move)
-                all_game_positions_t.append(game_t.copy())
-                turns_t.append(game_t.board.turn)
-                game_t.board.pop()
-
-        if not all_game_positions: return -1
-        
-        # **Batch model inference**
-        self.score_function.eval()
-        with torch.no_grad():
-            scores, _ = self.score_function(all_game_positions)
-            scores_t, _ = self.score_function(all_game_positions_t)
-
-        # Extract scores dynamically based on tracked player turns
-        turns_tensor = torch.tensor(turns, dtype=torch.long, device=self.score_function.device)
-        turns_t_tensor = torch.tensor(turns_t, dtype=torch.long, device=self.score_function.device)
-        scores = scores.gather(1, turns_tensor.view(-1, 1)).squeeze(1)  
-        scores_t = scores_t.gather(1, turns_t_tensor.view(-1, 1)).squeeze(1)
-
-        # Match scores back to games
-        move_scores = {}
-        for i, (game, move) in enumerate(all_moves):
-            if game not in move_scores:
-                move_scores[game] = {}
-            move_scores[game][move] = scores[i].item()  # Extract scalar
-        
-        # Compute accuracy
-        for game in games:
-            if game in move_scores:
-                best_move = best_moves_dict[game]
-                predicted_move = max(move_scores[game], key=move_scores[game].get)
-                correct_predictions += (predicted_move == best_move)
-
-        if self._train_config["UI"] == 'prints':
-            l = f"  Accuracy: {correct_predictions / total_games:.2f}"
-            l = Style("SECONDARY_INFO", f"{l: <{TrainConfig.line_length-2}}")
-            print(f"| {l} |")
-
-        return correct_predictions / total_games
-
 
     def predict(self, head="generation"):
         """
@@ -731,12 +666,6 @@ board_evaluation_head = BoardEvaluationHead()
 
 encoder_head = EncoderHead()
 """[configuration]: Train the model on the encoder head."""
-
-on_puzzles = OnPuzzles()
-"""[configuration]: Train the model on puzzles."""
-
-on_games = OnGames()
-"""[configuration]: Train the model on games."""
 
 with_prints = WithPrints()
 """[configuration]: Print the training steps."""
@@ -799,7 +728,7 @@ class ScoreModel(nn.Module):
         return encoding
 
 
-    def forward(self, games: list[Game], head="win_probs") -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, games: list[Game], head="board_evaluation") -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the score of a game for the given color.
 
@@ -821,7 +750,7 @@ class ScoreModel(nn.Module):
 
         embedding = self.embedding(encoding) # [batch_size, latent_dim]
 
-        if head == "win_probs":
+        if head == "board_evaluation":
             scores = self.classifier(embedding)
         elif head == "generation":
             scores = self.generative_head(embedding)

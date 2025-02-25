@@ -152,6 +152,7 @@ class LoaderSet:
     def __init__(self, loaders: list[Loader]):
         self.loaders = loaders
         self.layout = [[] for _ in loaders]
+        self.window = min([l.window for l in loaders])
 
     def need_update(self, epoch, _idx=False):
         idx = [l.need_update(epoch) for l in self.loaders]

@@ -25,7 +25,7 @@ if __name__ == "__main__":
     
     nb_batches = 4
     batch_size = 2
-    epochs = 12
+    epochs = 2
     test_size = 10
 
     games: list[Game] = []
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     print("Environment ready.")
 
                  
-    with model | encoder_head | with_prints | auto_save as env:
+    with model | board_evaluation_head | with_prints | auto_save as env:
         env.train(
             epochs=epochs, 
             batch_size=batch_size, 
@@ -53,5 +53,4 @@ if __name__ == "__main__":
 
         env.test(loader=ld_games | ld_puzzles)
 
-    
     
