@@ -38,10 +38,11 @@ class Engine(Player, ABC):
     @abstractmethod
     def play(self) -> dict:
         """
-        Return the move played by the AI.
+        Return the move played by the AI. 
+        This method must be implemented in the child class.
         
-        :return: {"from": (int, int), "to": (int, int)}
-        :rtype: dict
+        :return: Move played by the AI
+        :rtype: chess.Move
         """
         raise NotImplementedError
     

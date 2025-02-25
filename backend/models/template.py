@@ -47,7 +47,7 @@ class DefaultDecoder(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.fc1 = nn.Linear(768, 1024)
+        self.fc1 = nn.Linear(512, 1024)
         self.fc2 = nn.Linear(1024, 1024)
         self.fc_board = nn.Linear(1024, 8*8*12)
         

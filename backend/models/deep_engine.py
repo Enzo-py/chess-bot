@@ -23,11 +23,63 @@ __all__ = ["DeepEngine", "all_heads", "generative_head", "board_evaluation_head"
 
 class DeepEngine(Engine):
     """
-    Implementation of a simple AI that plays random moves.
+    Extention of the Engine class to be able to manage deep learning models.
+    This class is abstract and should be inherited by a specific model.
+
+    The DeepEngine will auto load the model from the `./models/saves/class_name.active.pth` file if it exists.
+    As in engine, you have to implement the `play` method to play a move. By default, it will play the move predict by the generative head.
+    
+    DeepEngine declaration example:
+    ------------------------------
+    ```python
+    class MyModel(DeepEngine):
+        def __init__(self):
+            super().__init__()
+            # Board -- Encoder --> Latent
+            self.set(head_name="encoder", nn.Linear(8*8*13, 64))
+
+            # Latent -- Classifier --> Win probability (black, white)
+            self.set(head_name="board_evaluation", nn.Linear(64, 2))
+
+            # Latent -- Generative --> Move
+            self.set(head_name="generative", nn.Linear(64, 64*64*5))
+
+            # Latent -- Decoder --> Board
+            self.set(head_name="decoder", nn.Linear(64, 8*8*12).reshape(-1, 8, 8, 12))
+    ```
+
+    For more information about the heads, see the documentation of the `DeepEngineModule` class.
+    
+    Trainning the model:
+    --------------------
+
+    ```python
+    model = MyModel()
+    model.load("path/to/model.pth")
+
+    loader = Loader(...) # See loader documentation
+
+    print(model.manifest) # Get the model manifest
+
+    # Train the model
+    with model | {head_name} | {UI} | {auto_save} as env:
+        env.train(epochs=10, batch_size=32, loader=loader)
+        env.test(loader=loader)
+
+    ```
+
+    UI can be `with_prints` or nothing.
+    Auto save can be `auto_save` or nothing.
+
+    Information
+    -----------
+
+    DeepEngine allow the developper to create a model easly in the chess / engine context.
+    The train functions laverage different solution to make the trainning more efficient (such as contrastive loss, ...)
     """
 
     __author__ = "Enzo Pinchon"
-    __description__ = "Simple AI that plays random moves."
+    __description__ = "Deep Engine"
 
     PROMOTION_TABLE = {
         None: 0,
@@ -40,7 +92,7 @@ class DeepEngine(Engine):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.score_function = ScoreModel()
+        self.module = DeepEngineModule()
         """torch.nn.Module: The model used to score the games."""
 
         self.is_loaded = False
@@ -50,11 +102,37 @@ class DeepEngine(Engine):
     def __or__(self, other: TrainConfigBase) -> TrainConfig:
         """Permet d'enchaîner les configurations avec `|` et retourne le bon type."""
         return other.apply(self)
+    
+    @property
+    def manifest(self):
+        return {
+            "author": self.__author__,
+            "description": self.__description__,
+            "heads": {
+                "board_evaluation": type(self.module.classifier).__name__,
+                "generative": type(self.module.generative_head).__name__,
+                "encoder": type(self.module.embedding).__name__,
+                "decoder": type(self.module.generative_head).__name__,
+            },
+            "settings": {}
+        }
+
+    def set(self, head_name: str, head: nn.Module):
+        """
+        Set a head in the model.
+        """
+
+        assert head_name in ["board_evaluation", "generative", "encoder", "decoder"], "Invalid head name."
+        if head_name == "board_evaluation":
+            self.module.classifier = head
+        elif head_name == "generative":
+            self.module.generative_head = head
+        elif head_name == "encoder":
+            self.module.embedding = head
+        elif head_name == "decoder":
+            self.module.generative_head = head
 
     def play(self, **kwargs):
-        """
-        Play a random move.
-        """
 
         if not self.is_loaded:
             path = "./models/saves/" + self.__class__.__name__ + ".active.pth"
@@ -120,11 +198,11 @@ class DeepEngine(Engine):
                     raise FileNotFoundError(f"Model not found at {path}")
 
         if element == "all":
-            self.score_function.load_state_dict(torch.load(path, weights_only=True, map_location=self.score_function.device), strict=False)
+            self.module.load_state_dict(torch.load(path, weights_only=True, map_location=self.module.device), strict=False)
         elif element == "embedding":
-            self.score_function.embedding.load_state_dict(torch.load(path, weights_only=True, map_location=self.score_function.device), strict=False)
+            self.module.embedding.load_state_dict(torch.load(path, weights_only=True, map_location=self.module.device), strict=False)
         elif element == "classifier":
-            self.score_function.classifier.load_state_dict(torch.load(path, weights_only=True, map_location=self.score_function.device), strict=False)
+            self.module.classifier.load_state_dict(torch.load(path, weights_only=True, map_location=self.module.device), strict=False)
 
     def save(self, path: str=None, element: str="all"):
         """
@@ -142,11 +220,11 @@ class DeepEngine(Engine):
                 path = f"backend/models/saves/{self.__class__.__name__}-V{nb_other_files}.pth"
 
         if element == "all":
-            torch.save(self.score_function.state_dict(), path)
+            torch.save(self.module.state_dict(), path)
         elif element == "embedding":
-            torch.save(self.score_function.embedding.state_dict(), path)
+            torch.save(self.module.embedding.state_dict(), path)
         elif element == "classifier":
-            torch.save(self.score_function.classifier.state_dict(), path)
+            torch.save(self.module.classifier.state_dict(), path)
 
     def _exctract_data(self, loader: Loader, epoch: int, _for="train") -> tuple:
 
@@ -252,7 +330,7 @@ class DeepEngine(Engine):
             assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
             assert isinstance(win_probs[0], tuple), "'win_probs' should be a list of tuples."
 
-        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
+        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0005)
 
         num_samples = len(games or [])
         num_batches = (num_samples + batch_size - 1) // batch_size  # Ensure full coverage
@@ -280,13 +358,13 @@ class DeepEngine(Engine):
                 
                 batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
                 batch_games = [games[i] for i in batch_indices]
-                batch_win_probs = torch.tensor([win_probs[i] for i in batch_indices], dtype=torch.float32, device=self.score_function.device)
+                batch_win_probs = torch.tensor([win_probs[i] for i in batch_indices], dtype=torch.float32, device=self.module.device)
 
                 batch_games_t = [game.reverse() for game in batch_games]
 
                 # Predict the probabilities
-                probs, embeddings = self.score_function(batch_games, head="board_evaluation")
-                probs_t, embeddings_t = self.score_function(batch_games_t, head="board_evaluation")
+                probs, embeddings = self.module(batch_games, head="board_evaluation")
+                probs_t, embeddings_t = self.module(batch_games_t, head="board_evaluation")
 
                 # Compute classification loss (Binary Cross Entropy)
                 classification_loss = F.binary_cross_entropy(probs, batch_win_probs)
@@ -331,7 +409,7 @@ class DeepEngine(Engine):
         Train the model on the encoder head.
         """
 
-        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
+        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0005)
 
         num_samples = len(games or [])
         num_batches = (num_samples + batch_size - 1) // batch_size
@@ -361,8 +439,8 @@ class DeepEngine(Engine):
                 batch_games_t = [game.reverse() for game in batch_games]
 
                 # predict the moves
-                one_hot, turns, decoded_one_hot, decoded_turns, latent = self.score_function(batch_games, head="encoder")
-                _, _, _, _, latent_t = self.score_function(batch_games_t, head="encoder")
+                one_hot, turns, decoded_one_hot, decoded_turns, latent = self.module(batch_games, head="encoder")
+                _, _, _, _, latent_t = self.module(batch_games_t, head="encoder")
 
                 # flatten the one_hot 
                 one_hot = one_hot.view(one_hot.shape[0], -1)
@@ -436,7 +514,7 @@ class DeepEngine(Engine):
                         moves_dict[(i, j, k)] = len(moves_dict)
             torch.save(moves_dict, "backend/data/moves_dict.pth")
 
-        optimizer = torch.optim.Adam(self.score_function.parameters(), lr=0.0005)
+        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0005)
         criterion = nn.CrossEntropyLoss()
         legal_criterion = nn.BCEWithLogitsLoss()
 
@@ -468,11 +546,11 @@ class DeepEngine(Engine):
                 batch_best_moves_t = [Game.reverse_move(move) for move in batch_best_moves]
 
                 # predict the moves
-                predictions, embeddings = self.score_function(batch_games, head="generation") # [batch_size, 64*64*5]
-                predictions_t, embeddings_t = self.score_function(batch_games_t, head="generation")
+                predictions, embeddings = self.module(batch_games, head="generation") # [batch_size, 64*64*5]
+                predictions_t, embeddings_t = self.module(batch_games_t, head="generation")
 
                 targets = [moves_dict[self.encode_move(move)] for move in batch_best_moves]
-                targets = torch.tensor(targets, dtype=torch.long, device=self.score_function.device)
+                targets = torch.tensor(targets, dtype=torch.long, device=self.module.device)
 
                 # Compute loss: 1 to increase the prob of the best move, 0 for the others
                 best_move_loss = criterion(predictions, targets)
@@ -480,7 +558,7 @@ class DeepEngine(Engine):
                 # Compute a loss about legals move (1 if legal 0 if not)
                 legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]
                 legal_moves = [[1 if i in t else 0 for i in range(len(moves_dict))] for t in legal_moves]
-                legal_moves = torch.tensor(legal_moves, dtype=torch.float, device=self.score_function.device)
+                legal_moves = torch.tensor(legal_moves, dtype=torch.float, device=self.module.device)
                 legal_loss = legal_criterion(predictions.float(), legal_moves.float())
                 num_legal_moves = legal_moves.sum(dim=1, keepdim=True).clamp(min=1)
                 legal_loss = (legal_loss / num_legal_moves).sum() * 0.01 # normalize by the number of legal moves
@@ -545,9 +623,9 @@ class DeepEngine(Engine):
                         moves_dict[(i, j, k)] = len(moves_dict)
             torch.save(moves_dict, "backend/data/moves_dict.pth")
 
-        self.score_function.eval()
+        self.module.eval()
         with torch.no_grad():
-            predictions, _ = self.score_function(games, head="generation")
+            predictions, _ = self.module(games, head="generation")
             predictions = torch.argmax(predictions, dim=1)
 
         for i, best_move in enumerate(best_moves):
@@ -566,9 +644,9 @@ class DeepEngine(Engine):
         if loader is not None:
             games, _ = self._exctract_data(loader, 0, _for="test")
 
-        self.score_function.eval()
+        self.module.eval()
         with torch.no_grad():
-            one_hot, turns, decoded_one_hot, decoded_turns, _ = self.score_function(games, head="encoder")
+            one_hot, turns, decoded_one_hot, decoded_turns, _ = self.module(games, head="encoder")
 
         # Compute accuracy
         correct_predictions = 0
@@ -596,16 +674,16 @@ class DeepEngine(Engine):
         if loader is not None:
             games, win_probs = self._exctract_data(loader, 0, _for="test")
 
-        self.score_function.eval()
+        self.module.eval()
         with torch.no_grad():
-            probs, _ = self.score_function(games, head="board_evaluation")
+            probs, _ = self.module(games, head="board_evaluation")
             probs = torch.round(probs)
 
         # Compute accuracy
         correct_predictions = 0
 
         for i, game in enumerate(games):
-            correct_predictions += (probs[i] == torch.tensor(win_probs[i], device=self.score_function.device)).all().item()
+            correct_predictions += (probs[i] == torch.tensor(win_probs[i], device=self.module.device)).all().item()
 
         if self._train_config["UI"] == 'prints':
             l = f"  Accuracy: {correct_predictions / len(games):.2f}"
@@ -642,13 +720,12 @@ class DeepEngine(Engine):
 
         return loss
 
-
     def predict(self, head="generation"):
         """
         Predict the best move for the current game.
         """
-
-        scores, _ = self.score_function([self.game], head=head)
+        game_t = self.game.reverse() # for batchnorms
+        scores, _ = self.module([self.game, game_t], head=head)
         if head == "generation":
             return scores.tolist()[0]
         else:
@@ -673,10 +750,10 @@ with_prints = WithPrints()
 auto_save = AutoSave()
 """[configuration]: Automatically save the model."""
 
-class ScoreModel(nn.Module):
+class DeepEngineModule(nn.Module):
 
     def __init__(self):
-        super(ScoreModel, self).__init__()
+        super(DeepEngineModule, self).__init__()
 
         self.classifier = DefaultClassifier()
         """torch.nn.Module: The classifier head of the model. Should return [batch_size, 2]. -> [black_win, white_win]"""
