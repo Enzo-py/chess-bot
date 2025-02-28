@@ -48,7 +48,7 @@ class GenerativeHead(nn.Module):
         self.deconv1 = nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1)  # 8x8 → 16x16
         self.deconv2 = nn.ConvTranspose2d(64, 32, 3, stride=2, padding=2, output_padding=1, dilation=2)  # 16x16 → 32x32 (with dilation)
         self.deconv3 = nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1)  # 32x32 → 64x64
-        self.deconv4 = nn.Conv2d(16, 5, 3, padding=1)
+        self.deconv4 = nn.Conv2d(16, 5, 3, padding=1)  # 64x64 output
 
         self.norm1 = nn.GroupNorm(16, 1024)  # More stable than BatchNorm
         self.norm2 = nn.GroupNorm(16, 2048)
@@ -75,7 +75,7 @@ class GenerativeHead(nn.Module):
         x = self.deconv4(x)  # Final output (batch, 5, 64, 64)
 
         batch_size = x.shape[0]
-        return x.view(batch_size, 5 * 64 * 64)
+        return x.reshape(batch_size, 5 * 64 * 64)
 
 class ScoreClassifier(nn.Module):
     def __init__(self):

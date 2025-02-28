@@ -12,11 +12,11 @@ if __name__ == "__main__":
     
     print("Setup environment...")
     model = CNNScore()
-    model.load("backend/models/saves/CNNScore.active.pth")
+    model.load("backend/models/saves/CNNScore-V6.auto-save.pth")
     
-    nb_batches = 4
-    batch_size = 2
-    epochs = 2
+    nb_batches = 20
+    batch_size = 32
+    epochs = 80
     test_size = 10
 
     games: list[Game] = []
@@ -26,15 +26,34 @@ if __name__ == "__main__":
         chunksize=batch_size
     )
 
-    ld_puzzles = Loader(window=nb_batches, epochs_per_window=10).load(
+    ld_puzzles = Loader(window=nb_batches, epochs_per_window=5).load(
         "backend/data/lichess_db_puzzle.csv.zst", 
         Puzzle, 
         chunksize=batch_size
     )
 
+    # ld_puzzles.skip(nb_batches*64*50)
+
     print("Environment ready.")
 
-                 
+    # with model | encoder_head | with_prints | auto_save as env:
+    #     env.train(
+    #         epochs=epochs, 
+    #         batch_size=batch_size, 
+    #         loader=ld_games | ld_puzzles
+    #     )
+
+    #     env.test(loader=ld_games | ld_puzzles)
+
+    with model | generative_head | with_prints | auto_save as env:
+        env.train(
+            epochs=epochs, 
+            batch_size=batch_size, 
+            loader=ld_games
+        )
+
+        env.test(loader=ld_games | ld_puzzles)
+       
     with model | board_evaluation_head | with_prints | auto_save as env:
         env.train(
             epochs=epochs, 
