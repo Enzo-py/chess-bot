@@ -1,4 +1,4 @@
-from .engine import Engine
+from models.engine import Engine
 from .greedy_ai import GreedyAI
 from src.chess.simulation import Simulation
 
@@ -9,6 +9,9 @@ class GreedyExplorationAI(Engine):
     """
     Optimized Greedy AI that plays as strongly as possible with tree exploration.
     """
+
+    __author__ = "Enzo Pinchon"
+    __description__ = "Optimized Greedy AI that plays as strongly as possible with tree exploration."
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

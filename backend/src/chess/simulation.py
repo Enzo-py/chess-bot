@@ -5,7 +5,7 @@ import random
 class Simulation:
     def __init__(self, game: Game):
         self.initial_game = game
-        self.game: Game = Game().load_fen(game.fen())  # Avoid unnecessary Game() instantiation
+        self.game: Game = Game().load(game.fen())  # Avoid unnecessary Game() instantiation
         self.checkpoints = {}
 
     def __enter__(self):
@@ -20,10 +20,10 @@ class Simulation:
 
     def rollback(self, name: str):
         if (fen := self.checkpoints.get(name)):  # Prevent KeyError
-            self.game = Game.load_fen(fen)
+            self.game = Game.load(fen)
 
     def reset(self):
-        self.game = self.game.load_fen(self.initial_game.fen())
+        self.game = self.game.load(self.initial_game.fen())
         self.game.checkmate = self.initial_game.checkmate
         self.game.draw = self.initial_game.draw
         self.game.king_in_check = self.initial_game.king_in_check.copy()

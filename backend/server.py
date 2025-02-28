@@ -1,5 +1,4 @@
 
-import traceback
 from src.utils.socket_server import ServerSocket
 import src.utils.message as protocol
 
@@ -7,12 +6,16 @@ from meta import AVAILABLE_MODELS
 
 from src.chess.game import Game
 from src.chess.player import Player
+from models.engine import Engine
 
+import traceback
 import asyncio
 import json
 import chess
 
-ranking_path = "backend/data/ranking.json"
+PATHS = {
+    "ranking": ["./data/ranking.json", "backend/data/ranking.json"]
+}
 
 class Server:
     """
@@ -23,6 +26,35 @@ class Server:
         self.server = ServerSocket(_print=True)
 
         self.focused_game = None
+
+        for model in AVAILABLE_MODELS.values():
+            try: getattr(model, "__author__")
+            except: raise Engine.UndefinedAuthorError(model, f"Model {model.__name__} has no author")
+
+            try: getattr(model, "__description__")
+            except: raise Engine.UndefinedDescriptionError(model, f"Model {model.__name__} has no description")
+
+            try: getattr(model, "play")
+            except: raise Engine.UndefinedPlayMethodError(model, f"Model {model.__name__} has no play method")
+
+    def open_file(self, name, mode):
+        """
+        Open a file with the given name.
+
+        Was create because some computer need different paths to access the same file. 
+        (maybe it's because the person didn't follow the README)
+        """
+        if name in PATHS:
+            for path in PATHS[name]:
+                try:
+                    return open(path, mode)
+                except FileNotFoundError:
+                    continue
+                except Exception as e:
+                    raise e
+            raise Exception(f"File {name} not found")
+        else:
+            raise Exception(f"Path {name} not registered in PATHS")
 
     async def run(self):
 
@@ -187,7 +219,7 @@ class Server:
         """
         Get all registered players and AI.
         """
-        ranking = json.load(open(ranking_path, "r"))
+        ranking = json.load(self.open_file("ranking", "r"))
         
         ais = []
         players = []
@@ -205,7 +237,7 @@ class Server:
 
         all_players = players + ais
         all_players = sorted(all_players, key=lambda x: x["elo"], reverse=True)
-        json.dump(all_players, open(ranking_path, "w"), indent=4)
+        json.dump(all_players, self.open_file("ranking", "w"), indent=4)
 
         ctn = {
             "players": players,
@@ -217,7 +249,7 @@ class Server:
         """
         Create a new player with the given name.
         """
-        ranking = json.load(open(ranking_path, "r"))
+        ranking = json.load(self.open_file("ranking", "r"))
         if len(info['name']) < 3:
             asyncio.create_task(self.server.broadcast(protocol.Message("error", "Name too short").to_json()))
             return
@@ -232,7 +264,7 @@ class Server:
             "elo": 600,
             "games": []
         })
-        json.dump(ranking, open(ranking_path, "w"), indent=4)
+        json.dump(ranking, self.open_file("ranking", "w"), indent=4)
         asyncio.create_task(self.server.broadcast(protocol.Message("player-created", "Player created").to_json()))
 
 if __name__ == "__main__":

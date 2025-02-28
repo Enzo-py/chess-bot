@@ -24,8 +24,17 @@
 - To use stockfish, download the binary from [stockfishchess.org](https://stockfishchess.org/download/) and put the correct path in `backend/models/stockfish.py`.
 
 ### Running the Project
-1. Run the backend server: `python backend/server.py`
-2. Run the frontend server: `python -m http.server` (in the frontend directory)
+1. Run backend:
+    - Open a terminal at the root of the project
+    - execute: `cd backend`
+    - execute: `python server.py`
+
+2. Run the frontend: 
+    - Open a terminal at the root of the projecvt
+    - execute: `cd frontend`
+    - execute: `python -m http.server`
+
+3. Open a browser and go to `http://localhost:8000/`
 
 ## Notes
 - We chose an HTML/CSS interface over Pygame because, although Pygame is compatible with notebooks, it is challenging to code complex features.

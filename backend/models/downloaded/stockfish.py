@@ -1,11 +1,14 @@
 from stockfish import Stockfish
-from .engine import Engine
+from models.engine import Engine
 import chess
 
 class StockfishAI(Engine):
     """
     Chess AI that uses the Stockfish engine.
     """
+
+    __author__ = "Downloaded"
+    __description__ = "Chess AI that uses the Stockfish engine."
 
     def __init__(self, stockfish_path="/opt/homebrew/bin/stockfish", skill_level=20, depth=10, think_time=100, *args, **kwargs):
         """

@@ -1,4 +1,4 @@
-from .engine import Engine
+from models.engine import Engine
 
 import random
 
@@ -6,6 +6,9 @@ class RandomAI(Engine):
     """
     Random AI that plays a random move.
     """
+
+    __author__ = "Enzo Pinchon"
+    __description__ = "Random AI that plays a random move."
 
     def play(self) -> dict:
         """
