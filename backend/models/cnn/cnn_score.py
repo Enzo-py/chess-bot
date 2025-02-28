@@ -1,5 +1,5 @@
 import numpy as np
-from models.deep_engine import DeepEngine, ScoreModel
+from models.deep_engine import DeepEngine
 from models.cnn.cnn_toolbox import ResBlock, PositionalEncoding, CBAMChannelAttention
 
 from src.chess.game import Game
@@ -20,18 +20,21 @@ class CNNScore(DeepEngine):
     def __init__(self):
         super().__init__()
 
-        self.score_function = ScoreModelCNN()
+        self.set(head_name="board_evaluation", head=ScoreClassifier())
+        self.set(head_name="generative", head=GenerativeHead())
+        self.set(head_name="encoder", head=ChessEmbedding())
+
 
     
-class ScoreModelCNN(ScoreModel):
-    def __init__(self):
-        super().__init__()
+# class ScoreModelCNN(ScoreModel):
+#     def __init__(self):
+#         super().__init__()
 
-        self.embedding = ChessEmbedding()
-        self.classifier = ScoreClassifier()
-        self.generative_head = GenerativeHead()
+#         self.embedding = ChessEmbedding()
+#         self.classifier = ScoreClassifier()
+#         self.generative_head = GenerativeHead()
 
-        self.set_device()
+#         self.set_device()
 
 class GenerativeHead(nn.Module):
     def __init__(self):

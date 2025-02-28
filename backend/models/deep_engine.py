@@ -120,6 +120,11 @@ class DeepEngine(Engine):
     def set(self, head_name: str, head: nn.Module):
         """
         Set a head in the model.
+        Possibles heads are:
+        - board_evaluation
+        - generative
+        - encoder
+        - decoder
         """
 
         assert head_name in ["board_evaluation", "generative", "encoder", "decoder"], "Invalid head name."
@@ -131,6 +136,8 @@ class DeepEngine(Engine):
             self.module.embedding = head
         elif head_name == "decoder":
             self.module.generative_head = head
+
+        self.module.to(self.module.device)
 
     def play(self, **kwargs):
 
