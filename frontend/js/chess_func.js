@@ -361,6 +361,18 @@ async function move_piece(moves, event, piece, no_confirmation = false, promote 
         draw_piece(promote_piece_id, nearest_square.attr("id"));
     }
 
+    // castling
+    if (piece.attr("fen").toLowerCase() == "k" && Math.abs(nearest_square.attr("j-index") - pos_x_idx) == 2) {
+        let rook_pos = nearest_square.attr("j-index") > pos_x_idx ? "H" : "A";
+        let rook = d3.select(`g#board-pieces g[pos="${rook_pos}${piece.attr("pos")[1]}"]`);
+        let rook_dest = nearest_square.attr("j-index") > pos_x_idx ? pos_x_idx + 1 : pos_x_idx - 1;
+        rook_dest = String.fromCharCode('A'.charCodeAt(0) + rook_dest) + piece.attr("pos")[1];
+        rook.attr("transform", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")}) scale(${rook.attr("initial-scale")})`);
+        rook.attr("pos", rook_dest);
+        rook.attr("initial-pos", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")})`);
+        new Audio("../media/castle.mp3").play();
+    }
+
     pos_x_idx = piece.attr("pos")[0].charCodeAt(0) - 'A'.charCodeAt(0)
     if (!piece_on_square.empty() && piece_on_square !== piece) {
         // if piece of the same color, return to initial position: check if the both fen are uppercase or lowercase 
@@ -390,17 +402,7 @@ async function move_piece(moves, event, piece, no_confirmation = false, promote 
                 new Audio("../media/move-check.mp3").play();
             else
                 new Audio("../media/capture.mp3").play()
-        } else if (piece.attr("fen").toLowerCase() == "k" && Math.abs(nearest_square.attr("j-index") - pos_x_idx) == 2) {
-            // castling
-            let rook_pos = nearest_square.attr("j-index") > pos_x_idx ? "H" : "A";
-            let rook = d3.select(`g#board-pieces g[pos="${rook_pos}${piece.attr("pos")[1]}"]`);
-            let rook_dest = nearest_square.attr("j-index") > pos_x_idx ? pos_x_idx + 1 : pos_x_idx - 1;
-            rook_dest = String.fromCharCode('A'.charCodeAt(0) + rook_dest) + piece.attr("pos")[1];
-            rook.attr("transform", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")}) scale(${rook.attr("initial-scale")})`);
-            rook.attr("pos", rook_dest);
-            rook.attr("initial-pos", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")})`);
-            new Audio("../media/castle.mp3").play();
-        }
+        } 
         else
             new Audio("../media/move.mp3").play()
     }

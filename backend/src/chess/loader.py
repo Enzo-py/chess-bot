@@ -9,7 +9,7 @@ import io
 
 class Loader:
 
-    def __init__(self, window=None, epochs_per_window=None):
+    def __init__(self, window=None, epochs_per_window=None, min_elo=None):
         """
         Initialize a loader.
 
@@ -22,6 +22,8 @@ class Loader:
         :type window: int
         :param epochs_per_window: number of epochs per window
         :type epochs_per_window: int
+        :param min_elo: minimum ELO to filter games
+        :type min_elo: int
         """
 
         self.generator = None
@@ -29,6 +31,8 @@ class Loader:
 
         self.window = window
         self.epochs_per_window = epochs_per_window
+
+        self.min_elo = min_elo or 0
 
     def load(self, path: str, dtype: type = Game, chunksize: int = 128) -> Generator:
         """
@@ -120,6 +124,8 @@ class Loader:
     def _stream_pgn_zst(self, filepath, dtype, chunksize=128):
         """Stream a .pgn.zst file, decompressing line by line."""
         
+        skip = False
+
         with open(filepath, 'rb') as f:
             dctx = zstd.ZstdDecompressor()
             stream_reader = dctx.stream_reader(f)
@@ -130,13 +136,21 @@ class Loader:
             for line in text_stream:
                 buffer += line
                 if line.strip() == "":  # Empty line signals end of PGN game
-                    game = dtype().load(buffer, format="pgn")
-                    games.append(game)
+                    if not skip: 
+                        game = dtype().load(buffer, format="pgn")
+                        games.append(game)
+                    skip = False
                     buffer = ""  # Reset buffer for next game
 
                     if len(games) == chunksize:
                         yield games
                         games = []
+
+                elif "Elo" in line:
+                    current_elo = line.split(" ")[-1]
+                    current_elo = int(current_elo[1:-3])
+                    if current_elo < self.min_elo: skip = True
+                        
 
             if buffer.strip():  # Handle last game if no trailing newline
                 yield [dtype().load(buffer)]

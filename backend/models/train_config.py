@@ -87,7 +87,7 @@ class TrainConfig:
             assert labels is not None, "You need to provide labels (best moves or win probabilities) to train on."
             assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
         
-        self.engine.score_function.train()
+        self.engine.module.train()
         if self.engine._train_config["head"] == "all":
             ...
         elif self.engine._train_config["head"] == "generative":
@@ -125,7 +125,7 @@ class TrainConfig:
             assert games is not None, "You need to provide games to test on."
             assert best_moves is not None or self.engine._train_config["head"] == "encoder", "You need to provide best moves to test on."
 
-        self.engine.score_function.eval()
+        self.engine.module.eval()
         if self.engine._train_config["head"] == "all":
             ...
         elif self.engine._train_config["head"] == "generative":

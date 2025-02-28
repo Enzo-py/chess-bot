@@ -116,6 +116,13 @@ class DeepEngine(Engine):
             },
             "settings": {}
         }
+    
+    def evaluate(self, game: Game) -> float:
+        """
+        Evaluate the game: return the win probability of the game (black wr, white, wr).
+        """
+        self.game = game
+        return self.predict(head="board_evaluation")
 
     def set(self, head_name: str, head: nn.Module):
         """

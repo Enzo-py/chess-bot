@@ -7,20 +7,12 @@ from src.chess.game import Game
 from src.chess.puzzle import Puzzle
 from src.chess.loader import Loader
 
-from src.utils.console import Style
-
-import tqdm
-import torch
-import random
-
 if __name__ == "__main__":
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    print(f"Using device: {device}")
     
     print("Setup environment...")
     model = CNNScore()
-    # model.load("backend/models/saves/CNNScore.active.pth")
+    model.load("backend/models/saves/CNNScore.active.pth")
     
     nb_batches = 4
     batch_size = 2
@@ -28,7 +20,7 @@ if __name__ == "__main__":
     test_size = 10
 
     games: list[Game] = []
-    ld_games = Loader(window=nb_batches, epochs_per_window=10).load(
+    ld_games = Loader(window=nb_batches, epochs_per_window=10, min_elo=2000).load(
         "backend/data/lichess_db_standard_rated_2013-04.pgn.zst", 
         Game, 
         chunksize=batch_size
