@@ -82,7 +82,7 @@ class ServerSocket:
             ]
 
     HISTORY_LIMIT = 3
-    def __init__(self, host="127.0.0.1", port=9000, _print=False):
+    def __init__(self, host="127.0.0.1", port=5384, _print=False):
         self.host = host
         self.port = port
         self.running = False
