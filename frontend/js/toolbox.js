@@ -149,3 +149,10 @@ function pop_up_showcase(message) {
 
     return pop_up_wrapper;
 }
+
+function close_pop_up() {
+    var pop_ups = document.getElementsByClassName('pop-up-wrapper');
+    for (var i = 0; i < pop_ups.length; i++) {
+        pop_ups[i].remove();
+    }
+}

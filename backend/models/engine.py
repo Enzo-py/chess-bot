@@ -29,7 +29,6 @@ class Engine(Player, ABC):
         def __str__(self):
             return self.__repr__() + "\n" + Style("ERROR", self.message).__str__()
         
-        
     def __init__(self):
         super().__init__(self.__class__.__name__, True)
         self.color: str = 'undefined'
@@ -45,4 +44,11 @@ class Engine(Player, ABC):
         :rtype: chess.Move
         """
         raise NotImplementedError
+    
+    def setup(self):
+        """
+        Setup the engine before playing if needed.
+        This method can be implemented in the child class.
+        """
+        return self
     

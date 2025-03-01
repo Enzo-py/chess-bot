@@ -20,6 +20,17 @@
     <main>
         <div class="left-panel">
             <button id="start-game" class="material-symbols-outlined btn" title="play" onclick="start_game(this)">chess</button>
+            <button class="material-symbols-outlined btn" title="leaderboard" onclick="leaderboard()">leaderboard</button>
+            <button class="material-symbols-outlined btn" title="settings" onclick="settings()">settings</button>
+        </div>
+
+        <div class="evaluator-wrapper">
+            <div class="evaluator-block">
+                <progress class="evaluator" id="ev1" value="50" max="100" model="none"></progress>
+            </div>
+            <div class="evaluator-block">
+                <progress class="evaluator" id="ev2" value="50" max="100" model="none"></progress>
+            </div>
         </div>
 
         <div class="main-panel" game-started="false">
@@ -74,6 +85,7 @@
     <script>
         const socket = new WebSocket("ws://127.0.0.1:5384");
         const socket_data = {last_message: null};
+        let game_started = false
 
         function start_game() {
             ctn = `
@@ -217,6 +229,21 @@
             start_game();
         }
 
+        function setup_evaluators() {
+            ev1 = d3.select("#ev1");
+            ev2 = d3.select("#ev2");
+            ev_wrapper = d3.select(".evaluator-wrapper");
+            board_width = d3.select(".board-container").node().offsetWidth;
+            board_top = d3.select(".board-container").node().offsetTop;
+            ev_wrapper.style("margin-top", `${board_top}px`);
+
+            console.log("Board width", board_width);
+            console.log("Board top", board_top);
+
+            ev1.style("width", `${board_width}px`);
+            ev2.style("width", `${board_width}px`);
+        }
+
         function start_game_confirm() {
             game_mode = d3.select("#game-mode").node().value;
             player_color = d3.select("#player-color").node().value;
@@ -242,6 +269,7 @@
             }
 
             d3.select("div.main-panel").attr("game-started", "true");
+            game_started = true;
         }
 
         function game_mode_change() {
@@ -265,6 +293,105 @@
             } else {
                 d3.select(".pvp-selection-block").style("display", "none");
             }
+        }
+
+        function leaderboard() {
+            content = `
+                <button class="material-symbols-outlined close-btn" title="close" onclick="close_pop_up()">close</button>
+                <span class="title">Leaderboard</span>
+                <div class="leaderboard"></div>
+            `
+
+            pop_up = pop_up_showcase(content);
+        }
+
+        function settings() {
+            content = `
+                <button class="material-symbols-outlined close-btn" title="close" onclick="close_pop_up()">close</button>
+                <span class="title">Settings</span>
+                <div class="settings">
+                    <div class="group">
+                        <label for="evaluator1">Evaluator 1</label>
+                        <select id="evaluator1" class="form-input" onchange="update_evaluator_model(this, 'ev1')">
+                            <option value="none">None</option>
+                        </select>
+                    </div>
+
+                    <div class="group">
+                        <label for="evaluator2">Evaluator 2</label>
+                        <select id="evaluator2" class="form-input" onchange="update_evaluator_model(this, 'ev2')">
+                            <option value="none">None</option>
+                        </select>
+                    </div>
+                </div>
+            `
+                        
+            pop_up = pop_up_showcase(content);
+            pop_up = d3.select(pop_up)
+            console.log("Pop-up", pop_up.select("#evaluator2"));
+
+            send_message("get-evaluators-list", {}, true, "Getting evaluators list...");
+            wait_for_message("evaluators-list", 1000).then((data) => {
+                data = data.data.message // [{name: ..., description: ..., elo: ...}]
+                console.log("Evaluators list", data);
+                pop_up.select("#evaluator1")
+                    .data(data)
+                    .join()
+                    .append("option")
+                    .attr("value", d => d.name)
+                    .text(d => `${d.name} - ${d.elo} ELO`);
+
+                pop_up.select("#evaluator2")
+                    .data(data)
+                    .join()
+                    .append("option")
+                    .attr("value", d => d.name)
+                    .text(d => `${d.name} - ${d.elo} ELO`);
+            }).catch((error) => {
+                console.error(error);
+            });
+        }
+
+        async function update_evaluator() {
+            if (!game_started) {
+                return;
+            }
+            evaluator1 = d3.select("#ev1")
+            evaluator2 = d3.select("#ev2")
+            
+            model1 = evaluator1.attr("model")
+            model2 = evaluator2.attr("model")
+
+            if (model1 != "none") {
+                evaluator1.style("display", "block");
+                evaluator1.style("outline-color", "red")
+                send_message("evaluate-game", {model: model1});
+                ev1_value = await wait_for_message("game-evaluated", 10000, true);
+                evaluator1.attr("value", ev1_value);
+                evaluator1.style("outline-color", "green")
+            } else {
+                evaluator1.style("display", "none");
+            }
+
+            if (model2 != "none") {
+                evaluator2.style("display", "block");
+                evaluator2.style("outline-color", "red")
+                send_message("evaluate-game", {model: model2});
+                ev2_value = await wait_for_message("game-evaluated", 10000, true);
+                evaluator2.attr("value", ev2_value);
+                evaluator2.style("outline-color", "green")
+            } else {
+                evaluator2.style("display", "none");
+            }
+
+            if (game_started) setup_evaluators()
+        }
+
+        function update_evaluator_model(field, ev_id) {
+            model_name = field.value;
+            evaluator = d3.select(`#${ev_id}`)
+            evaluator.attr("model", model_name);
+            update_evaluator();
         }
     
         function send_message(type, data, waiting_screen = false, msg = '') {

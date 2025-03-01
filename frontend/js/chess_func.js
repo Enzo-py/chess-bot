@@ -234,6 +234,7 @@ const dragHandler = d3.drag()
 
         if (saved_possible_moves[piece_id] !== undefined) {
             move_piece(saved_possible_moves[piece_id], event, piece);
+            update_evaluator()
             return;
         }
 
@@ -250,6 +251,7 @@ const dragHandler = d3.drag()
             }
             saved_possible_moves[piece_id] = data.moves;
             move_piece(data.moves, event, d3.select(this));
+            update_evaluator()
         }).catch((error) => {
             console.error(error)
         })

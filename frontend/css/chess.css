@@ -4,6 +4,10 @@ main {
     justify-content: space-between;
 }
 
+main .evaluator-wrapper .evaluator-block > progress {
+    display: none;
+}
+
 main:has( div[game-started="false"]) .right-panel,
 main:has( div[game-started="false"]) .main-panel {
     display: none;
@@ -79,4 +83,40 @@ main:has( div[game-started="false"]) .main-panel {
     border-radius: 2px;
     display: flex;
     gap: 10px;
+}
+
+.evaluator-wrapper {
+    display: flex;
+    flex-direction: row-reverse;
+    margin-right: 6px;
+}
+
+.evaluator-block {
+    width: 40px;
+    height: 90svh;
+}
+
+progress.evaluator {
+    transform: rotateZ(90deg);
+    height: 40px;
+    width: 90svh;
+    position: relative;
+    border-radius: 0;
+    bottom: -45svh;
+    outline: solid 2px var(--background-color);
+}
+
+progress.evaluator#ev1 { left: calc(-45svh + 20px);}
+progress.evaluator#ev2 { left: calc(-45svh + 20px - 5px);}
+
+progress.evaluator::-webkit-progress-bar {
+    background-color: #f1f1f1;
+    height: 40px;
+    width: 90svh;
+}
+
+progress.evaluator::-webkit-progress-value {
+    background-color: #4d4d4d;
+    height: 40px;
+    width: 90svh;
 }

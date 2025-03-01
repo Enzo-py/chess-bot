@@ -95,13 +95,27 @@ class DeepEngine(Engine):
         self.module = DeepEngineModule()
         """torch.nn.Module: The model used to score the games."""
 
-        self.is_loaded = False
+        self.is_setup = False
+    
         self.auto_save_version = None
         self._train_config = {"mode": None, "head": None, "UI": None, "auto_save": False}
 
     def __or__(self, other: TrainConfigBase) -> TrainConfig:
         """Permet d'enchaîner les configurations avec `|` et retourne le bon type."""
         return other.apply(self)
+    
+    def setup(self, *args, **kwargs):
+        """
+        Setup the model.
+        """
+        path = "./models/saves/" + self.__class__.__name__ + ".active.pth"
+        if os.path.exists(path):
+            self.load(path)
+            self.is_setup = True
+        else:
+            raise FileNotFoundError(f"Model not found at {path}")
+        
+        return self
     
     @property
     def manifest(self):
@@ -121,6 +135,7 @@ class DeepEngine(Engine):
         """
         Evaluate the game: return the win probability of the game (black wr, white, wr).
         """
+        self.setup()
         self.game = game
         return self.predict(head="board_evaluation")
 
@@ -147,14 +162,8 @@ class DeepEngine(Engine):
         self.module.to(self.module.device)
 
     def play(self, **kwargs):
-
-        if not self.is_loaded:
-            path = "./models/saves/" + self.__class__.__name__ + ".active.pth"
-            if os.path.exists(path):
-                self.load(path)
-                self.is_loaded = True
-            else:
-                raise FileNotFoundError(f"Model not found at {path}")
+        # check if setup, not mandatory but avoid hard to debug errors
+        if not self.is_setup: raise ValueError("Model not setup.")
 
         scores = self.predict()
         legal_moves = list(self.game.board.legal_moves)
@@ -738,8 +747,9 @@ class DeepEngine(Engine):
         """
         Predict the best move for the current game.
         """
-        game_t = self.game.reverse() # for batchnorms
-        scores, _ = self.module([self.game, game_t], head=head)
+        self.module.eval()
+        with torch.no_grad():
+            scores, _ = self.module([self.game, self.game], head=head) # 2 views of the same game for batchnorm
         if head == "generation":
             return scores.tolist()[0]
         else:

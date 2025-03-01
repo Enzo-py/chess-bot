@@ -96,6 +96,18 @@ class Server:
             lambda client, message: self.create_player(message.content) if message.type == "create-player" else None
         )
 
+        self.server.on(
+            ServerSocket.EVENTS_TYPES.on_message,
+            "get-evaluators-list",
+            lambda client, message: self.get_evaluators_list() if message.type == "get-evaluators-list" else None
+        )
+
+        self.server.on(
+            ServerSocket.EVENTS_TYPES.on_message,
+            "evaluate-game",
+            lambda client, message: self.evaluate_game(message.content) if message.type == "evaluate-game" else None
+        )
+
         # Main loop
         while self.server.running:
             await asyncio.sleep(2)
@@ -111,15 +123,16 @@ class Server:
             else:
                 self.focused_game.play(white=Player(info["player2"]), black=Player(info["player1"]))
         elif info["game_mode"] == "PvAI":
-            ai = AVAILABLE_MODELS[info["ai_selection"]]()
+            ai = AVAILABLE_MODELS[info["ai_selection"]]().setup()
             if info["player_color"] == "w":
                 self.focused_game.play(white=Player(info["player"]), black=ai)
             else:
                 self.focused_game.play(white=ai, black=Player(info["player"]))
 
         elif info["game_mode"] == "AIvAI":
-            ai1 = AVAILABLE_MODELS[info["ai1_selection"]]()
-            ai2 = AVAILABLE_MODELS[info["ai2_selection"]]()
+            ai1 = AVAILABLE_MODELS[info["ai1_selection"]]().setup()
+            ai2 = AVAILABLE_MODELS[info["ai2_selection"]]().setup()
+    
             if info["player_color"] == "w":
                 self.focused_game.play(white=ai1, black=ai2)
             else:
@@ -135,6 +148,40 @@ class Server:
         # wait 1s before playing the first move
         await asyncio.sleep(0.8)
         self.focused_game.play_engine_move()
+
+    def get_evaluators_list(self):
+        """
+        Get all available evaluators.
+        """
+        
+        # a model is an evaluator if it has a 'evaluate' method
+        evaluators = []
+        for name, model in AVAILABLE_MODELS.items():
+            try: getattr(model, "evaluate")
+            except: continue
+
+            evaluators.append({
+                "name": name,
+                "author": model.__author__,
+                "description": model.__description__
+            })
+
+        asyncio.create_task(self.server.broadcast(protocol.Message("evaluators-list", evaluators).to_json()))
+
+    def evaluate_game(self, info):
+        """return win probability for blacks"""
+        model_name = info["model"]
+        if model_name not in AVAILABLE_MODELS:
+            asyncio.create_task(self.server.broadcast(protocol.Message("error", f"Model {model_name} not found").to_json()))
+            return
+        
+        if self.focused_game is None:
+            asyncio.create_task(self.server.broadcast(protocol.Message("error", "No game started").to_json()))
+            return
+        
+        model = AVAILABLE_MODELS[model_name]()
+        outcome = int(model.evaluate(self.focused_game)[0] * 100)
+        asyncio.create_task(self.server.broadcast(protocol.Message("game-evaluated", outcome).to_json()))
 
     def get_possible_moves(self, info):
         """

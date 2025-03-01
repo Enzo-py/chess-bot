@@ -13,6 +13,8 @@ function read_message(event) {
             break;
         case "game-started":
             read_game_started(content.data.message);
+            setup_evaluators()
+            update_evaluator()
             break;
         case "confirm-move":
             game_state.turn = game_state.turn === "w" ? "b" : "w";
@@ -69,6 +71,7 @@ function read_ai_move(data) {
     move_piece(null, rect, piece, true, promote);
 
     update_right_panel()
+    update_evaluator()
 }
 
 function update_right_panel() {

@@ -89,6 +89,17 @@ class Loader:
 
         return window
     
+    def skip(self, n: int):
+        """
+        Skip n elements in the generator.
+
+        :param n: number of elements to skip
+        :type n: int
+        """
+
+        for _ in range(n):
+            next(self.generator)
+    
     def __or__(self, other: 'Loader') -> 'Loader':
         """
         Chain two loaders together.

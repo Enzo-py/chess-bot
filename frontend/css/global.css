@@ -250,3 +250,21 @@ button.next-button {
     flex-direction: column;
     gap: 10px;
 }
+
+button.close-btn {
+    margin: 0 0 8px auto !important;
+    cursor: pointer;
+    color: var(--background-color);
+    background-color: var(--danger-color);
+    width: 20px;
+    height: 20px;
+    text-align: center;
+    border-radius: 4px;
+    border: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 20px;
+    font-weight: bold;
+    padding: 0 !important;
+}
