@@ -425,6 +425,12 @@ class DeepEngine(Engine):
                 print(f"| {l2} |")
                 print(f"| {'': <{TrainConfig.line_length-2}} |")
 
+            if self._train_config["auto_save"]:
+                if self.auto_save_version is None:
+                    files = [f for f in os.listdir("backend/models/saves") if self.__class__.__name__ in f and "auto-save" in f]
+                    self.auto_save_version = len(files)
+                self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
+
         return all_total_loss, all_contrastive_loss, all_embedding_loss, all_classification_loss
 
     def _train_encoder(self, epochs: int, batch_size, games: list[Game], loader: Loader = None):

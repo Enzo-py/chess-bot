@@ -157,14 +157,28 @@ class Loader:
                         yield games
                         games = []
 
-                elif "Elo" in line:
+                elif "Elo" in line and self.min_elo > 0:
+                    if "?" in line:
+                        skip = True
+                        continue
+                    
                     current_elo = line.split(" ")[-1]
                     current_elo = int(current_elo[1:-3])
                     if current_elo < self.min_elo: skip = True
-                        
 
             if buffer.strip():  # Handle last game if no trailing newline
                 yield [dtype().load(buffer)]
+
+    def skip(self, n: int):
+        """
+        Skip n elements in the generator.
+
+        :param n: number of elements to skip
+        :type n: int
+        """
+
+        for _ in range(n):
+            next(self.generator)
 
     def need_update(self, epoch):
         return epoch == 0 or (self.epochs_per_window is not None and epoch % self.epochs_per_window == 0)
