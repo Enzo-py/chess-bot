@@ -1,6 +1,6 @@
 import numpy as np
 from models.deep_engine import DeepEngine
-from models.cnn.cnn_toolbox import ResBlock, PositionalEncoding, CBAMChannelAttention
+from models.cnn.cnn_toolbox import SqueezeExcitation
 
 from src.chess.game import Game
 
@@ -20,76 +20,128 @@ class CNNScore(DeepEngine):
     def __init__(self):
         super().__init__()
 
-        self.set(head_name="board_evaluation", head=ScoreClassifier())
+        self.set(head_name="board_evaluation", head=BoardEvaluator())
         self.set(head_name="generative", head=GenerativeHead())
         self.set(head_name="encoder", head=ChessEmbedding())
 
-
     
-# class ScoreModelCNN(ScoreModel):
-#     def __init__(self):
-#         super().__init__()
-
-#         self.embedding = ChessEmbedding()
-#         self.classifier = ScoreClassifier()
-#         self.generative_head = GenerativeHead()
-
-#         self.set_device()
-
 class GenerativeHead(nn.Module):
     def __init__(self):
         super().__init__()
 
+        # Heatmap Feature Extractor (CNN Encoder)
+        self.heatmap_encoder = nn.Sequential(
+            nn.Conv2d(4, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4)),  # Reduce spatial size
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))  # Final output (batch, 64, 1, 1)
+        )
+
+        # MLP Feature Expansion
         self.fc1 = nn.Linear(512, 1024)
         self.fc2 = nn.Linear(1024, 2048)
-        self.shortcut = nn.Linear(512, 2048)  # Residual connection
+        self.shortcut1 = nn.Linear(512, 1024)
+        self.shortcut2 = nn.Linear(1024, 2048)
 
-        self.fc3 = nn.Linear(2048, 8 * 8 * 128)  # Project to spatial features
-        self.deconv1 = nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1)  # 8x8 → 16x16
-        self.deconv2 = nn.ConvTranspose2d(64, 32, 3, stride=2, padding=2, output_padding=1, dilation=2)  # 16x16 → 32x32 (with dilation)
-        self.deconv3 = nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1)  # 32x32 → 64x64
-        self.deconv4 = nn.Conv2d(16, 5, 3, padding=1)  # 64x64 output
+        # Heatmap feature fusion
+        self.fc_heatmap = nn.Linear(64, 128)
+        self.fc_fusion = nn.Linear(2048 + 128, 2048)  # Combine MLP and heatmap features
 
-        self.norm1 = nn.GroupNorm(16, 1024)  # More stable than BatchNorm
-        self.norm2 = nn.GroupNorm(16, 2048)
-        self.dropout = nn.Dropout(0.2)  # Increased for stability
+        # Spatial Projection
+        self.fc3 = nn.Linear(2048, 8 * 8 * 128)
+
+        # CNN Decoder with SE Attention
+        self.upsample1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.conv1 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.se1 = SqueezeExcitation(64)
+
+        self.upsample2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
+        self.se2 = SqueezeExcitation(32)
+
+        self.upsample3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+
+        self.final_conv = nn.Conv2d(16, 5, kernel_size=3, padding=1)  # Output: (batch, 5, 64, 64)
+
+        # Normalization and Dropout
+        self.norm1 = nn.LayerNorm(1024)
+        self.norm2 = nn.LayerNorm(2048)
+        self.dropout = nn.Dropout(0.3)
 
     def forward(self, x):
-        shortcut = self.shortcut(x)  # Save input for residual connection
-        x = F.gelu(self.fc1(x))
+        x, heatmaps = x  # x = (batch, 512), heatmaps = (batch, 4, 8, 8)
+
+        # Process Heatmaps
+        heatmap_features = self.heatmap_encoder(heatmaps)  # (batch, 64, 1, 1)
+        heatmap_features = heatmap_features.view(x.size(0), -1)  # Flatten to (batch, 64)
+        heatmap_features = F.silu(self.fc_heatmap(heatmap_features))  # Expand to (batch, 128)
+
+        # MLP Expansion with Residual Connections
+        shortcut1 = self.shortcut1(x)
+        x = F.silu(self.fc1(x))
         x = self.norm1(x)
         x = self.dropout(x)
+        x = x + shortcut1  # Residual
 
-        x = F.gelu(self.fc2(x))
+        shortcut2 = self.shortcut2(x)
+        x = F.silu(self.fc2(x))
         x = self.norm2(x)
         x = self.dropout(x)
+        x = x + shortcut2  # Residual
 
-        x = x + shortcut  # Apply residual connection
+        # Fuse Heatmap Features with MLP Features
+        x = torch.cat([x, heatmap_features], dim=1)  # (batch, 2048 + 128)
+        x = F.silu(self.fc_fusion(x))  # Merge heatmap and MLP representations
 
-        x = self.fc3(x)
-        x = x.view(-1, 128, 8, 8)  # Reshape for CNN decoding
+        # Spatial Projection
+        x = self.fc3(x).view(-1, 128, 8, 8)  # Reshape to (batch, 128, 8, 8)
 
-        x = F.gelu(self.deconv1(x))  # 8x8 → 16x16
-        x = F.gelu(self.deconv2(x))  # 16x16 → 32x32
-        x = F.gelu(self.deconv3(x))  # 32x32 → 64x64
-        x = self.deconv4(x)  # Final output (batch, 5, 64, 64)
+        # CNN Decoder with Attention
+        x = self.upsample1(x)
+        x = F.silu(self.conv1(x))
+        x = self.se1(x)
+
+        x = self.upsample2(x)
+        x = F.silu(self.conv2(x))
+        x = self.se2(x)
+
+        x = self.upsample3(x)
+        x = F.silu(self.conv3(x))
+
+        x = self.final_conv(x)  # (batch, 5, 64, 64)
 
         batch_size = x.shape[0]
-        return x.reshape(batch_size, 5 * 64 * 64)
+        return x.view(batch_size, 5 * 64 * 64)
 
-class ScoreClassifier(nn.Module):
+class BoardEvaluator(nn.Module):
     def __init__(self):
         super().__init__()
 
+        # Convolutional feature extractor for heatmaps
+        self.cnn = nn.Sequential(
+            nn.Conv2d(4, 16, kernel_size=3, padding=1),  
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),  
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d(1)  # Output shape: (batch, 32, 1, 1)
+        )
+
+        # MLP for feature vector
         self.MLP1 = nn.Sequential(
             nn.Linear(512, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.LayerNorm(256),  # ✅ Better than BatchNorm for small batches
+            nn.LayerNorm(256),
         )
 
+        # Final classifier combining CNN and MLP outputs
         self.MLP2 = nn.Sequential(
-            nn.Linear(256, 128),
+            nn.Linear(256 + 32, 128),  # Merge CNN output (32) with MLP output (256)
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.LayerNorm(128),
@@ -99,8 +151,20 @@ class ScoreClassifier(nn.Module):
         )
 
     def forward(self, x):
-        x = self.MLP1(x)  # Shape: (batch, 256)
-        x = self.MLP2(x)  # Shape: (batch, 2)
+        x, heatmaps = x
+
+        # Process heatmaps using CNN
+        heatmap_features = self.cnn(heatmaps)  # (batch, 32, 1, 1)
+        heatmap_features = heatmap_features.view(x.size(0), -1)  # Flatten to (batch, 32)
+
+        # Process feature vector
+        x = self.MLP1(x)  # (batch, 256)
+
+        # Merge both feature representations
+        x = torch.cat([x, heatmap_features], dim=1)  # (batch, 256 + 32)
+
+        # Final classification
+        x = self.MLP2(x)  # (batch, 2)
 
         return F.softmax(x, dim=1)
     
@@ -123,7 +187,6 @@ class DepthwiseResBlock(nn.Module):
         x = self.norm(x)
         return self.act(x + res)
 
-
 class SEAttention(nn.Module):
     def __init__(self, in_channels, reduction=4):
         super().__init__()
@@ -145,17 +208,15 @@ class HeatMap(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv1 = nn.Conv2d(13, 64, 3, padding=1)
-        self.conv2 = nn.Conv2d(64, 32, 5, padding=2)
+        self.conv2 = nn.Conv2d(64, 32, 3, padding=1)
         self.conv3 = nn.Conv2d(32, 1, 3, padding=1)
-        self.norm = nn.BatchNorm2d(64)
-        self.act = nn.ReLU()
+        self.relu = nn.ReLU()
         self.se = SEAttention(64)
 
     def forward(self, x):
-        x = self.act(self.conv1(x))
-        x = self.norm(x)
+        x = self.relu(self.conv1(x))
         x = self.se(x)  # Apply attention
-        x = self.act(self.conv2(x))
+        x = self.relu(self.conv2(x))
         x = torch.sigmoid(self.conv3(x))
         return x  # (batch, 1, 8, 8)
 
@@ -175,7 +236,7 @@ class ChessEmbedding(nn.Module):
         self.heatmap4 = HeatMap()
 
         # Final embedding projection
-        self.proj = nn.Linear(512 + 256, 512)   # Project concatenated output to fixed dim
+        # self.proj = nn.Linear(512, 512)   # Project concatenated output to fixed dim
         self.norm = nn.LayerNorm(512)
 
     def forward(self, x):
@@ -197,11 +258,11 @@ class ChessEmbedding(nn.Module):
         # Flatten outputs
         x = x.view(x.shape[0], -1)  # (batch, 512)
         heatmaps = torch.cat([heatmap1, heatmap2, heatmap3, heatmap4], dim=1)  # (batch, 4, 8, 8)
-        heatmaps = heatmaps.view(heatmaps.shape[0], -1)  # Flatten (batch, 4 * 8 * 8)
+        # heatmaps = heatmaps.view(heatmaps.shape[0], -1)  # Flatten (batch, 4 * 8 * 8)
 
         # Concatenate and project
-        x = torch.cat([x, heatmaps], dim=1)  # (batch, 512 + 4 * 8 * 8)
-        x = self.proj(x)
+        # x = torch.cat([x, heatmaps], dim=1)  # (batch, 512 + 4 * 8 * 8)
+        # x = self.proj(x)
         x = self.norm(x)
 
-        return x  # Final embedding (batch, 512)
+        return x, heatmaps  # Final embedding (batch, 512), heatmaps 

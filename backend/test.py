@@ -9,14 +9,13 @@ from src.chess.loader import Loader
 
 if __name__ == "__main__":
     
-    
     print("Setup environment...")
     model = CNNScore()
-    model.load("backend/models/saves/CNNScore-V6.auto-save.pth")
+    # model.load("backend/models/saves/CNNScore.active.pth")
     
-    nb_batches = 20
-    batch_size = 32
-    epochs = 80
+    nb_batches = 1
+    batch_size = 2
+    epochs = 1
     test_size = 10
 
     games: list[Game] = []
@@ -36,14 +35,14 @@ if __name__ == "__main__":
 
     print("Environment ready.")
 
-    # with model | encoder_head | with_prints | auto_save as env:
-    #     env.train(
-    #         epochs=epochs, 
-    #         batch_size=batch_size, 
-    #         loader=ld_games | ld_puzzles
-    #     )
+    with model | encoder_head | with_prints | auto_save as env:
+        env.train(
+            epochs=epochs, 
+            batch_size=batch_size, 
+            loader=ld_games | ld_puzzles
+        )
 
-    #     env.test(loader=ld_games | ld_puzzles)
+        env.test(loader=ld_games | ld_puzzles)
 
     with model | generative_head | with_prints | auto_save as env:
         env.train(

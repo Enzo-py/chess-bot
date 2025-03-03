@@ -395,11 +395,11 @@ class DeepEngine(Engine):
                 # Compute contrastive loss (make embeddings for original and flipped boards similar)
                 contrastive_loss = self.embedding_contrastive_loss(embeddings, embeddings_t)
 
-                # Compute embedding loss (optional: regularization for stable embeddings)
-                embedding_loss = torch.mean(torch.norm(embeddings, dim=-1))  # L2 norm regularization
+                # # Compute embedding loss (optional: regularization for stable embeddings)
+                # embedding_loss = torch.mean(torch.norm(embeddings, dim=-1))  # L2 norm regularization
 
                 # Total loss
-                loss = classification_loss + 0.15 * contrastive_loss + 0.01 * embedding_loss
+                loss = classification_loss + 0.15 * contrastive_loss #+ 0.01 * embedding_loss
 
                 # Backpropagation
                 optimizer.zero_grad()
@@ -408,17 +408,17 @@ class DeepEngine(Engine):
 
                 total_loss += loss.item()
                 contrastive_loss_total += contrastive_loss.item()
-                embedding_loss_total += embedding_loss.item()
+                # embedding_loss_total += embedding_loss.item()
                 classification_loss_total += classification_loss.item()
 
             all_total_loss.append(total_loss / num_batches)
             all_contrastive_loss.append(contrastive_loss_total / num_batches)
-            all_embedding_loss.append(embedding_loss_total / num_batches)
+            # all_embedding_loss.append(embedding_loss_total / num_batches)
             all_classification_loss.append(classification_loss_total / num_batches)
 
             if self._train_config["UI"] == 'prints':
                 l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Contrastive Loss: {contrastive_loss_total / num_batches:.2f}, " 
-                l2 = f"  Embedding Loss: {embedding_loss_total / num_batches:.2f} Classification Loss: {classification_loss_total / num_batches:.2f}"
+                l2 = f"  Classification Loss: {classification_loss_total / num_batches:.2f}"
                 l1 = Style("INFO", f"{l1: <{TrainConfig.line_length-2}}")
                 l2 = Style("INFO", f"{l2: <{TrainConfig.line_length-2}}")
                 print(f"| {l1} |")
@@ -579,8 +579,8 @@ class DeepEngine(Engine):
                 best_move_loss = criterion(predictions, targets)
 
                 # Compute a loss about legals move (1 if legal 0 if not)
-                legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]
-                legal_moves = [[1 if i in t else 0 for i in range(len(moves_dict))] for t in legal_moves]
+                all_legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]
+                legal_moves = [[int(i in legal_moves) for i in range(64*64*5)] for legal_moves in all_legal_moves]
                 legal_moves = torch.tensor(legal_moves, dtype=torch.float, device=self.module.device)
                 legal_loss = legal_criterion(predictions.float(), legal_moves.float())
                 num_legal_moves = legal_moves.sum(dim=1, keepdim=True).clamp(min=1)
@@ -857,9 +857,14 @@ class DeepEngineModule(nn.Module):
             scores = self.generative_head(embedding)
         elif head == "encoder":
             decoded_one_hots, decoded_turns = self.decoder(embedding)
+            if isinstance(embedding, tuple):
+                return one_hots, turns, decoded_one_hots, decoded_turns, embedding[0]
             return one_hots, turns, decoded_one_hots, decoded_turns, embedding
         else:
             raise ValueError(f"Invalid head: {head}")
+        
+        if isinstance(embedding, tuple): # allow to work with rich embeddings
+            return scores, embedding[0]
 
         return scores, embedding  
         
