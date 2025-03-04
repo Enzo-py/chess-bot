@@ -1,5 +1,8 @@
 # Final Project: Advanced Machine learning and Autonomous Agents
 
+![Project Overview](image.png)
+
+
 ## Project Structure
 
 ### Backend
