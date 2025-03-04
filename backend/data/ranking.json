@@ -52,5 +52,11 @@
         "type": "AI",
         "elo": 600,
         "games": []
+    },
+    {
+        "model": "Tree Search CNN",
+        "type": "AI",
+        "elo": 600,
+        "games": []
     }
 ]

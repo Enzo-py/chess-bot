@@ -23,33 +23,18 @@ class CNNScore(DeepEngine):
         self.set(head_name="board_evaluation", head=BoardEvaluator())
         self.set(head_name="generative", head=GenerativeHead())
         self.set(head_name="encoder", head=ChessEmbedding())
+        self.set(head_name="decoder", head=Decoder())
 
     
 class GenerativeHead(nn.Module):
     def __init__(self):
         super().__init__()
 
-        # Heatmap Feature Extractor (CNN Encoder)
-        self.heatmap_encoder = nn.Sequential(
-            nn.Conv2d(4, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((4, 4)),  # Reduce spatial size
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 1))  # Final output (batch, 64, 1, 1)
-        )
-
         # MLP Feature Expansion
-        self.fc1 = nn.Linear(512, 1024)
+        self.fc1 = nn.Linear(512 + 256, 1024)
         self.fc2 = nn.Linear(1024, 2048)
-        self.shortcut1 = nn.Linear(512, 1024)
+        self.shortcut1 = nn.Linear(512 + 256, 1024)
         self.shortcut2 = nn.Linear(1024, 2048)
-
-        # Heatmap feature fusion
-        self.fc_heatmap = nn.Linear(64, 128)
-        self.fc_fusion = nn.Linear(2048 + 128, 2048)  # Combine MLP and heatmap features
 
         # Spatial Projection
         self.fc3 = nn.Linear(2048, 8 * 8 * 128)
@@ -74,13 +59,6 @@ class GenerativeHead(nn.Module):
         self.dropout = nn.Dropout(0.3)
 
     def forward(self, x):
-        x, heatmaps = x  # x = (batch, 512), heatmaps = (batch, 4, 8, 8)
-
-        # Process Heatmaps
-        heatmap_features = self.heatmap_encoder(heatmaps)  # (batch, 64, 1, 1)
-        heatmap_features = heatmap_features.view(x.size(0), -1)  # Flatten to (batch, 64)
-        heatmap_features = F.silu(self.fc_heatmap(heatmap_features))  # Expand to (batch, 128)
-
         # MLP Expansion with Residual Connections
         shortcut1 = self.shortcut1(x)
         x = F.silu(self.fc1(x))
@@ -93,10 +71,6 @@ class GenerativeHead(nn.Module):
         x = self.norm2(x)
         x = self.dropout(x)
         x = x + shortcut2  # Residual
-
-        # Fuse Heatmap Features with MLP Features
-        x = torch.cat([x, heatmap_features], dim=1)  # (batch, 2048 + 128)
-        x = F.silu(self.fc_fusion(x))  # Merge heatmap and MLP representations
 
         # Spatial Projection
         x = self.fc3(x).view(-1, 128, 8, 8)  # Reshape to (batch, 128, 8, 8)
@@ -122,26 +96,17 @@ class BoardEvaluator(nn.Module):
     def __init__(self):
         super().__init__()
 
-        # Convolutional feature extractor for heatmaps
-        self.cnn = nn.Sequential(
-            nn.Conv2d(4, 16, kernel_size=3, padding=1),  
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),  
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d(1)  # Output shape: (batch, 32, 1, 1)
-        )
-
         # MLP for feature vector
         self.MLP1 = nn.Sequential(
-            nn.Linear(512, 256),
+            nn.Linear(512 + 256, 512),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.LayerNorm(256),
+            nn.LayerNorm(512),
         )
 
         # Final classifier combining CNN and MLP outputs
         self.MLP2 = nn.Sequential(
-            nn.Linear(256 + 32, 128),  # Merge CNN output (32) with MLP output (256)
+            nn.Linear(512, 128),  # Merge CNN output (32) with MLP output (256)
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.LayerNorm(128),
@@ -151,21 +116,8 @@ class BoardEvaluator(nn.Module):
         )
 
     def forward(self, x):
-        x, heatmaps = x
-
-        # Process heatmaps using CNN
-        heatmap_features = self.cnn(heatmaps)  # (batch, 32, 1, 1)
-        heatmap_features = heatmap_features.view(x.size(0), -1)  # Flatten to (batch, 32)
-
-        # Process feature vector
         x = self.MLP1(x)  # (batch, 256)
-
-        # Merge both feature representations
-        x = torch.cat([x, heatmap_features], dim=1)  # (batch, 256 + 32)
-
-        # Final classification
         x = self.MLP2(x)  # (batch, 2)
-
         return F.softmax(x, dim=1)
     
 class DepthwiseResBlock(nn.Module):
@@ -184,7 +136,9 @@ class DepthwiseResBlock(nn.Module):
         res = self.residual(x)
         x = self.depthwise(x)
         x = self.pointwise(x)
-        x = self.norm(x)
+
+        if x.shape[0] > 1: # BatchNorm requires batch size > 1
+            x = self.norm(x)
         return self.act(x + res)
 
 class SEAttention(nn.Module):
@@ -236,8 +190,8 @@ class ChessEmbedding(nn.Module):
         self.heatmap4 = HeatMap()
 
         # Final embedding projection
-        # self.proj = nn.Linear(512, 512)   # Project concatenated output to fixed dim
-        self.norm = nn.LayerNorm(512)
+        self.proj = nn.Linear(512 + 256, 512 + 256)   # Project concatenated output to fixed dim
+        self.norm = nn.LayerNorm(512 + 256)
 
     def forward(self, x):
         x = x.permute(0, 3, 1, 2)  # (batch, 8, 8, 14) -> (batch, 14, 8, 8)
@@ -258,11 +212,39 @@ class ChessEmbedding(nn.Module):
         # Flatten outputs
         x = x.view(x.shape[0], -1)  # (batch, 512)
         heatmaps = torch.cat([heatmap1, heatmap2, heatmap3, heatmap4], dim=1)  # (batch, 4, 8, 8)
-        # heatmaps = heatmaps.view(heatmaps.shape[0], -1)  # Flatten (batch, 4 * 8 * 8)
+        heatmaps = heatmaps.view(heatmaps.shape[0], -1)  # Flatten (batch, 4 * 8 * 8)
 
         # Concatenate and project
-        # x = torch.cat([x, heatmaps], dim=1)  # (batch, 512 + 4 * 8 * 8)
-        # x = self.proj(x)
+        x = torch.cat([x, heatmaps], dim=1)  # (batch, 512 + 4 * 8 * 8)
+        x = self.proj(x)
         x = self.norm(x)
 
-        return x, heatmaps  # Final embedding (batch, 512), heatmaps 
+        return x  # Final embedding (batch, 512 + 256) 
+
+class Decoder(nn.Module):
+    """from latent to board"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.fc1 = nn.Linear(512 + 256, 1024)
+        self.fc2 = nn.Linear(1024, 1024)
+        self.fc_board = nn.Linear(1024, 8*8*12)
+        
+        self.fc_turn = nn.Linear(1024, 1)
+
+    def forward(self, x):
+        """
+        x: [batch_size, 256]
+        """
+
+        if isinstance(x, tuple):
+            x = x[0]
+
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x_board = self.fc_board(x)
+        x_board = x_board.view(-1, 8, 8, 12)
+
+        x_turn = self.fc_turn(x)
+        return x_board, x_turn

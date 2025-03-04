@@ -4,7 +4,7 @@ from src.utils.console import Style
 __all__ = ["TrainConfig", "TrainConfigBase", "AllHeads", "GenerativeHead", "BoardEvaluationHead", "EncoderHead", "WithPrints", "AutoSave"]
 
 class TrainConfig:
-    """Configuration de l'entraînement via `|`."""
+    """Train configuration manager."""
 
     line_length = 80
 
@@ -20,7 +20,7 @@ class TrainConfig:
         self.engine = engine
 
     def __enter__(self) -> 'TrainConfig':
-        """Démarre un contexte de training."""
+        """Start the training session."""
         
         if self.engine._train_config["UI"] == 'prints':
             print('╭' + '─'*self.line_length + '╮')
@@ -35,7 +35,7 @@ class TrainConfig:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        """Fin du contexte."""
+        """End the training session."""
 
         # check if error
         if exc_type is not None:
@@ -57,6 +57,8 @@ class TrainConfig:
         self.engine._train_config["head"] = None
         self.engine._train_config["mode"] = None
         self.engine._train_config["UI"] = None
+        self.engine._train_config["auto_save"] = False
+        self.engine._train_config["load_policy"] = "all"
 
     def __or__(self, value: 'TrainConfigBase') -> 'TrainConfig':
         """Applique une configuration."""
@@ -64,8 +66,8 @@ class TrainConfig:
 
     def train(self, epochs=10, batch_size=16, **data):
         """
-            Exécute l'entraînement. ---------------
-            wow
+            Train the model.
+            You need to provide the games and the labels OR a loader.
         """
         undefined_config = []
         if self.engine._train_config["head"] is None:
@@ -89,7 +91,7 @@ class TrainConfig:
         
         self.engine.module.train()
         if self.engine._train_config["head"] == "all":
-            ...
+            raise NotImplementedError("Training all heads is not implemented yet.")
         elif self.engine._train_config["head"] == "generative":
             return self.engine._train_on_generation(epochs, batch_size, games, labels, loader=loader)
         
@@ -104,7 +106,7 @@ class TrainConfig:
         
 
     def test(self, _plot=False, **data):
-        """Évalue le modèle."""
+        """Evaluate the model."""
         
         undefined_config = []
         if self.engine._train_config["head"] is None:
@@ -127,7 +129,7 @@ class TrainConfig:
 
         self.engine.module.eval()
         if self.engine._train_config["head"] == "all":
-            ...
+            raise NotImplementedError("Testing all heads is not implemented yet.")
         elif self.engine._train_config["head"] == "generative":
             return self.engine._test_generation(games, best_moves, loader=loader)
         elif self.engine._train_config["head"] == "board_evaluation":
@@ -137,10 +139,16 @@ class TrainConfig:
         else:
             raise ValueError(f"Invalid head: {self.engine._train_config['head']}")
 
-    @property
-    def print(self):
-        """Affiche la configuration."""
-        self._print = True
+    def set_load_policy(self, policy):
+        """
+            Define the loading policy of the games.
+            The policy can be:
+                - "all": load all type of games
+                - "early-game": load only games at the early stage (first 10 moves)
+                - "mid-game": load only games at the mid stage (10 to 30 moves)
+                - "end-game": load only games at the end stage (more than 30 moves)
+        """
+        self.engine._train_config["load_policy"] = policy
         return self
 
 class TrainConfigBase(ABC):

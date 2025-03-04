@@ -98,7 +98,7 @@ class DeepEngine(Engine):
         self.is_setup = False
     
         self.auto_save_version = None
-        self._train_config = {"mode": None, "head": None, "UI": None, "auto_save": False}
+        self._train_config = {"mode": None, "head": None, "UI": None, "auto_save": False, "load_policy": "all"}
 
     def __or__(self, other: TrainConfigBase) -> TrainConfig:
         """Permet d'enchaîner les configurations avec `|` et retourne le bon type."""
@@ -157,7 +157,7 @@ class DeepEngine(Engine):
         elif head_name == "encoder":
             self.module.embedding = head
         elif head_name == "decoder":
-            self.module.generative_head = head
+            self.module.decoder = head
 
         self.module.to(self.module.device)
 
@@ -581,8 +581,13 @@ class DeepEngine(Engine):
                 targets = [moves_dict[self.encode_move(move)] for move in batch_best_moves]
                 targets = torch.tensor(targets, dtype=torch.long, device=self.module.device)
 
+                targets_t = [moves_dict[self.encode_move(move)] for move in batch_best_moves_t]
+                targets_t = torch.tensor(targets_t, dtype=torch.long, device=self.module.device)
+
                 # Compute loss: 1 to increase the prob of the best move, 0 for the others
                 best_move_loss = criterion(predictions, targets)
+                best_move_t_loss = criterion(predictions_t, targets_t)
+                best_move_loss = (best_move_loss + best_move_t_loss) / 2
 
                 # Compute a loss about legals move (1 if legal 0 if not)
                 all_legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]

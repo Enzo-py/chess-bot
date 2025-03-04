@@ -329,7 +329,6 @@ async function move_piece(moves, event, piece, no_confirmation = false, promote 
         promote_piece_id = promote !== undefined ? promote : null;
     }
 
-
     if (!no_confirmation) {
         send_message("move-piece", {
             piece: piece.attr("fen"),
@@ -364,18 +363,21 @@ async function move_piece(moves, event, piece, no_confirmation = false, promote 
     }
 
     // castling
+    pos_x_idx = piece.attr("pos")[0].charCodeAt(0) - 'A'.charCodeAt(0)
     if (piece.attr("fen").toLowerCase() == "k" && Math.abs(nearest_square.attr("j-index") - pos_x_idx) == 2) {
-        let rook_pos = nearest_square.attr("j-index") > pos_x_idx ? "H" : "A";
-        let rook = d3.select(`g#board-pieces g[pos="${rook_pos}${piece.attr("pos")[1]}"]`);
-        let rook_dest = nearest_square.attr("j-index") > pos_x_idx ? pos_x_idx + 1 : pos_x_idx - 1;
-        rook_dest = String.fromCharCode('A'.charCodeAt(0) + rook_dest) + piece.attr("pos")[1];
-        rook.attr("transform", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")}) scale(${rook.attr("initial-scale")})`);
-        rook.attr("pos", rook_dest);
-        rook.attr("initial-pos", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")})`);
-        new Audio("../media/castle.mp3").play();
+        console.log("Castling")
+        if (nearest_square.attr("i-index") == 0 || nearest_square.attr("i-index") == 7) {
+            let rook_pos = nearest_square.attr("j-index") > pos_x_idx ? "H" : "A";
+            let rook = d3.select(`g#board-pieces g[pos="${rook_pos}${piece.attr("pos")[1]}"]`);
+            let rook_dest = nearest_square.attr("j-index") > pos_x_idx ? pos_x_idx + 1 : pos_x_idx - 1;
+            rook_dest = String.fromCharCode('A'.charCodeAt(0) + rook_dest) + piece.attr("pos")[1];
+            rook.attr("transform", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")}) scale(${rook.attr("initial-scale")})`);
+            rook.attr("pos", rook_dest);
+            rook.attr("initial-pos", `translate(${d3.select(`rect#${rook_dest}`).attr("x")}, ${d3.select(`rect#${rook_dest}`).attr("y")})`);
+            new Audio("../media/castle.mp3").play();
+        }
     }
 
-    pos_x_idx = piece.attr("pos")[0].charCodeAt(0) - 'A'.charCodeAt(0)
     if (!piece_on_square.empty() && piece_on_square !== piece) {
         // if piece of the same color, return to initial position: check if the both fen are uppercase or lowercase 
         is_upper = piece.attr("fen").charCodeAt(0) < 91;

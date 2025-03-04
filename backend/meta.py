@@ -5,6 +5,7 @@ from models.downloaded.stockfish import StockfishAI
 from models.rl.alpha_beta import SunfishAI
 from models.rl.mcts import MonteCarloAI
 from models.cnn.cnn_score import CNNScore
+from models.cnn.tree_search_cnn import TreeSearchCNN
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
@@ -14,6 +15,7 @@ AVAILABLE_MODELS = {
     "Sunfish AI": SunfishAI,
     "MCTS AI": MonteCarloAI,
     "Score CNN": CNNScore,
+    "Tree Search CNN": TreeSearchCNN,
 }
 """
 This dictionary exposes all the models that are available for testing or using in the interface.
