@@ -33,7 +33,7 @@ class MonteCarloAI(Engine):
     Implemented some heuristics and optimizations that guide the search more effectively. Instead of purely random playouts, it uses move selection based on piece values (MVV-LVA principle) and positional advantages . Improved evaluation function. weighted random selection explore/exploit. Check previous commit for the initial simple version.
     """
 
-    __author__ = "Shashuat ..."
+    __author__ = "Shashwat SHARMA"
     __description__ = "Monte Carlo Tree Search AI that uses MCTS algorithm to select moves."
 
     def __init__(self, *args, **kwargs):
