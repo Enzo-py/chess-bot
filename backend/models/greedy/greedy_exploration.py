@@ -17,10 +17,10 @@ class GreedyExplorationAI(Engine):
         super().__init__(*args, **kwargs)
         self.greedy = None
 
-        self.exploration_size = 10
+        self.exploration_size = 20
         self.exploration_depth = 3
-        self.exploration_sample = 150
-        self.choice_exploration = 5
+        self.exploration_sample = 100
+        self.choice_exploration = 3
 
         assert self.exploration_sample % 2 == 0, "Exploration sample must be even"
 
@@ -39,7 +39,6 @@ class GreedyExplorationAI(Engine):
         move_scores = np.zeros(len(top_moves))
         # Explore each move using simulations
         for i, move in enumerate(top_moves):
-            
             with Simulation(self.game) as sm:
                 scores = np.zeros(self.exploration_sample)
 

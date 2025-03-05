@@ -11,11 +11,11 @@ if __name__ == "__main__":
     
     print("Setup environment...")
     model = CNNScore()
-    model.load("backend/models/saves/CNNScore-V20.auto-save.pth")
+    # model.load("backend/models/saves/CNNScore-V20.auto-save.pth")
     
-    nb_batches = 5
-    batch_size = 32
-    epochs = 10
+    nb_batches = 1
+    batch_size = 2
+    epochs = 1
     test_size = 18
 
     games: list[Game] = []
@@ -36,30 +36,21 @@ if __name__ == "__main__":
 
     print("Environment ready.")
 
-    # with model | encoder_head | with_prints | auto_save as env:
-    #     env.train(
-    #         epochs=epochs, 
-    #         batch_size=batch_size, 
-    #         loader=ld_games | ld_puzzles
-    #     )
+    with model | encoder_head | with_prints | auto_save as env:
+        env.train(
+            epochs=epochs, 
+            batch_size=batch_size, 
+            loader=ld_games | ld_puzzles
+        )
 
-    #     env.test(loader=ld_games | ld_puzzles)
+        env.test(loader=ld_games | ld_puzzles)
 
-    # with model | generative_head | with_prints | auto_save as env:
-    #     env.train(
-    #         epochs=epochs, 
-    #         batch_size=batch_size, 
-    #         loader=ld_games
-    #     )
-
-    #     env.test(loader=ld_games | ld_puzzles)
-       
-    with model | board_evaluation_head | with_prints | auto_save as env:
-        # env.train(
-        #     epochs=epochs, 
-        #     batch_size=batch_size, 
-        #     loader=ld_games | ld_puzzles
-        # )
+    with model | generative_head | with_prints | auto_save as env:
+        env.train(
+            epochs=epochs, 
+            batch_size=batch_size, 
+            loader=ld_games
+        )
 
         env.test(loader=ld_games | ld_puzzles)
 
@@ -73,11 +64,11 @@ if __name__ == "__main__":
     #     env.test(loader=ld_games | ld_puzzles)
        
     with model | board_evaluation_head | with_prints | auto_save as env:
-        # env.train(
-        #     epochs=epochs, 
-        #     batch_size=batch_size, 
-        #     loader=ld_games | ld_puzzles
-        # )
+        env.train(
+            epochs=epochs, 
+            batch_size=batch_size, 
+            loader=ld_games | ld_puzzles
+        )
 
         env.test(loader=ld_games | ld_puzzles)
 

@@ -1,6 +1,6 @@
 import numpy as np
 from models.deep_engine import DeepEngine
-from models.cnn.cnn_toolbox import SqueezeExcitation
+from models.cnn.cnn_toolbox import CrossAttention
 
 from src.chess.game import Game
 
@@ -33,25 +33,16 @@ class GenerativeHead(nn.Module):
         # MLP Feature Expansion
         self.fc1 = nn.Linear(512 + 256, 1024)
         self.fc2 = nn.Linear(1024, 2048)
-        self.shortcut1 = nn.Linear(512 + 256, 1024)
-        self.shortcut2 = nn.Linear(1024, 2048)
+        self.shortcut1 = nn.Linear(512 + 256, 2048)
 
-        # Spatial Projection
-        self.fc3 = nn.Linear(2048, 8 * 8 * 128)
+        self.fc1_2 = nn.Linear(512 + 256, 1024)
+        self.fc2_2 = nn.Linear(1024, 2048)
+        self.shortcut1_2 = nn.Linear(512 + 256, 2048)
 
-        # CNN Decoder with SE Attention
-        self.upsample1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.conv1 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
-        self.se1 = SqueezeExcitation(64)
+        # cross attention
+        self.cross_attention = CrossAttention(2048)
 
-        self.upsample2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
-        self.se2 = SqueezeExcitation(32)
-
-        self.upsample3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
-
-        self.final_conv = nn.Conv2d(16, 5, kernel_size=3, padding=1)  # Output: (batch, 5, 64, 64)
+        self.projection = nn.Linear(2048, 64*64*5)
 
         # Normalization and Dropout
         self.norm1 = nn.LayerNorm(1024)
@@ -61,36 +52,29 @@ class GenerativeHead(nn.Module):
     def forward(self, x):
         # MLP Expansion with Residual Connections
         shortcut1 = self.shortcut1(x)
-        x = F.silu(self.fc1(x))
-        x = self.norm1(x)
-        x = self.dropout(x)
-        x = x + shortcut1  # Residual
+        shortcut1_2 = self.shortcut1_2(x)
 
-        shortcut2 = self.shortcut2(x)
-        x = F.silu(self.fc2(x))
-        x = self.norm2(x)
-        x = self.dropout(x)
-        x = x + shortcut2  # Residual
+        x_1 = F.relu(self.fc1(x))
+        x_1 = self.norm1(x_1)
+        x_1 = self.dropout(x_1)
+        x_1 = F.relu(self.fc2(x_1))
+        x_1 = self.norm2(x_1)
+        x_1 += shortcut1
 
-        # Spatial Projection
-        x = self.fc3(x).view(-1, 128, 8, 8)  # Reshape to (batch, 128, 8, 8)
+        x_2 = F.relu(self.fc1_2(x))
+        x_2 = self.norm1(x_2)
+        x_2 = self.dropout(x_2)
+        x_2 = F.relu(self.fc2_2(x_2))
+        x_2 = self.norm2(x_2)
+        x_2 += shortcut1_2
 
-        # CNN Decoder with Attention
-        x = self.upsample1(x)
-        x = F.silu(self.conv1(x))
-        x = self.se1(x)
+        # Cross Attention
+        x = self.cross_attention(x_1, x_2)
 
-        x = self.upsample2(x)
-        x = F.silu(self.conv2(x))
-        x = self.se2(x)
+        # Projection
+        x = self.projection(x)
 
-        x = self.upsample3(x)
-        x = F.silu(self.conv3(x))
-
-        x = self.final_conv(x)  # (batch, 5, 64, 64)
-
-        batch_size = x.shape[0]
-        return x.view(batch_size, 5 * 64 * 64)
+        return x
 
 class BoardEvaluator(nn.Module):
     def __init__(self):
@@ -101,23 +85,22 @@ class BoardEvaluator(nn.Module):
             nn.Linear(512 + 256, 512),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.LayerNorm(512),
-        )
-
-        # Final classifier combining CNN and MLP outputs
-        self.MLP2 = nn.Sequential(
-            nn.Linear(512, 128),  # Merge CNN output (32) with MLP output (256)
+            nn.Linear(512, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.LayerNorm(128),
+            nn.LayerNorm(256),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(128, 64),
             nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(64, 2)
         )
 
+
     def forward(self, x):
         x = self.MLP1(x)  # (batch, 256)
-        x = self.MLP2(x)  # (batch, 2)
         return F.softmax(x, dim=1)
     
 class DepthwiseResBlock(nn.Module):

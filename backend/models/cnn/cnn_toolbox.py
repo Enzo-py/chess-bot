@@ -199,3 +199,18 @@ class SelfAttention(nn.Module):
         V = self.value(x)
         attention_scores = self.softmax(torch.matmul(Q, K.transpose(-2, -1)) / (x.size(-1) ** 0.5))
         return torch.matmul(attention_scores, V)
+    
+class CrossAttention(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.query = nn.Linear(embed_dim, embed_dim)
+        self.key = nn.Linear(embed_dim, embed_dim)
+        self.value = nn.Linear(embed_dim, embed_dim)
+        self.softmax = nn.Softmax(dim=-1)
+    
+    def forward(self, x, y):
+        Q = self.query(x)
+        K = self.key(y)
+        V = self.value(y)
+        attention_scores = self.softmax(torch.matmul(Q, K.transpose(-2, -1)) / (x.size(-1) ** 0.5))
+        return torch.matmul(attention_scores, V)

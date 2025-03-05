@@ -1,7 +1,7 @@
 import numpy as np
 from src.chess.simulation import Simulation
 from models.deep_engine import DeepEngine
-from models.cnn.cnn_score import BoardEvaluator, GenerativeHead, ChessEmbedding
+from models.cnn.cnn_score import BoardEvaluator, GenerativeHead, ChessEmbedding, Decoder
 import torch
 import torch.nn.functional as F
 import chess
@@ -18,9 +18,11 @@ class TreeSearchCNN(DeepEngine):
         self.set(head_name="board_evaluation", head=BoardEvaluator())
         self.set(head_name="generative", head=GenerativeHead())
         self.set(head_name="encoder", head=ChessEmbedding())
+        self.set(head_name="decoder", head=Decoder())
 
         self.top_proba = 0.35
         self.temperature = 1
+        self.shallow = False
 
         # Exploration parameters:
         self.exploration_size = 5         # Number of top candidate moves
@@ -30,7 +32,7 @@ class TreeSearchCNN(DeepEngine):
         # Ensure even number of samples (if needed by your logic)
         assert self.exploration_sample % 2 == 0, "Exploration sample must be even"
 
-    def choose_move(self) -> chess.Move:
+    def choose_move(self, get_probs=False) -> chess.Move:
         legal_moves = list(self.game.board.legal_moves)
         logits = [
             self.predict(head="generation")[self.encode_move(move, as_int=True)]
@@ -54,8 +56,27 @@ class TreeSearchCNN(DeepEngine):
         probs = probs[:idx]
         total = sum(probs)
         probs = [p / total for p in probs]
+
+        if get_probs: return probs, possibles_moves
         return np.random.choice(possibles_moves, p=probs)
 
     def play(self) -> chess.Move:
         if not self.is_setup: raise ValueError("Model not setup.")
-        return self.choose_move()
+        if self.shallow: return self.choose_move()
+
+        probs, possibles_moves = self.choose_move(get_probs=True)
+        move_score = np.zeros(len(list(possibles_moves)))
+        
+        if len(possibles_moves) == 0: return None
+        if len(possibles_moves) == 1: return list(possibles_moves)[0]
+        
+        with Simulation(self.game) as sm:
+            for i, move in enumerate(possibles_moves):
+                print(f"Move {i + 1}/{len(list(possibles_moves))}")
+                sm.game.move(move)
+                sm.run(engine=TreeSearchCNN, depth=-1)
+                move_score[i] = -1 if self.game.checkmate == self.color else (1 if self.game.checkmate == (not self.color) else 0)
+                sm.reset()
+                move_score[i] *= probs[i]
+
+        return list(possibles_moves)[np.argmax(move_score)]
