@@ -465,17 +465,16 @@ class DeepEngine(Engine):
                 _, _, _, _, latent_t = self.module(batch_games_t, head="encoder")
 
                 # logits to one_hot
-                max_indices = torch.argmax(decoded_one_hot_logits, dim=-1)  # Shape: (b, 8, 8, 13)
-                decoded_one_hot = torch.zeros_like(decoded_one_hot_logits)
-                decoded_one_hot.scatter_(-1, max_indices.unsqueeze(-1), 1)
+                # max_indices = torch.argmax(decoded_one_hot_logits, dim=-1)  # Shape: (b, 8, 8, 13)
+                # decoded_one_hot = torch.zeros_like(decoded_one_hot_logits)
+                # decoded_one_hot.scatter_(-1, max_indices.unsqueeze(-1), 1)
                 
-
                 # flatten the one_hot 
                 one_hot = one_hot.view(one_hot.shape[0], -1)
-                decoded_one_hot = decoded_one_hot.view(decoded_one_hot.shape[0], -1)
+                decoded_one_hot_logits = decoded_one_hot_logits.view(decoded_one_hot_logits.shape[0], -1)
 
                 # Compute loss
-                loss_one_hot = F.binary_cross_entropy(decoded_one_hot, one_hot) 
+                loss_one_hot = F.binary_cross_entropy_with_logits(decoded_one_hot_logits, one_hot) 
                 loss_turn = F.binary_cross_entropy_with_logits(decoded_turns, turns)
                 contrastive_loss = self._contrastive_loss(latent, latent_t) # fondamentally not totally correct cuz color inversion latent + color inversion = latent_t but we don't add the vector color inversion should be fixe
 
