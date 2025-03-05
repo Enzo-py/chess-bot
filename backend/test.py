@@ -15,7 +15,7 @@ if __name__ == "__main__":
     
     nb_batches = 1
     batch_size = 2
-    epochs = 1
+    epochs = 4
     test_size = 18
 
     games: list[Game] = []

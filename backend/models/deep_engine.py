@@ -464,21 +464,19 @@ class DeepEngine(Engine):
                 one_hot, turns, decoded_one_hot_logits, decoded_turns, latent = self.module(batch_games, head="encoder")
                 _, _, _, _, latent_t = self.module(batch_games_t, head="encoder")
 
-                # logits to one_hot
-                # max_indices = torch.argmax(decoded_one_hot_logits, dim=-1)  # Shape: (b, 8, 8, 13)
-                # decoded_one_hot = torch.zeros_like(decoded_one_hot_logits)
-                # decoded_one_hot.scatter_(-1, max_indices.unsqueeze(-1), 1)
-                
-                # flatten the one_hot 
-                one_hot = one_hot.view(one_hot.shape[0], -1)
-                decoded_one_hot_logits = decoded_one_hot_logits.view(decoded_one_hot_logits.shape[0], -1)
-
                 # Compute loss
-                loss_one_hot = F.binary_cross_entropy_with_logits(decoded_one_hot_logits, one_hot) 
+                decoded_one_hot_logits = decoded_one_hot_logits.view(-1, 12)
+                one_hot = one_hot.view(-1, 12)  # Flatten one-hot target
+                target_labels = one_hot.argmax(dim=-1)  # Shape: [batch_size]
+
+                one_hot_target = torch.zeros_like(decoded_one_hot_logits)  # Create a tensor of zeros with the same shape as logits
+                one_hot_target.scatter_(1, target_labels.view(-1, 1), 1)  # Fill the tensor with 1s at the target indices   
+                
+                loss_one_hot = F.binary_cross_entropy_with_logits(decoded_one_hot_logits, one_hot_target)
                 loss_turn = F.binary_cross_entropy_with_logits(decoded_turns, turns)
                 contrastive_loss = self._contrastive_loss(latent, latent_t) # fondamentally not totally correct cuz color inversion latent + color inversion = latent_t but we don't add the vector color inversion should be fixe
 
-                loss = loss_one_hot + loss_turn + contrastive_loss * 0.01 # increase when fixed
+                loss = loss_one_hot + loss_turn + contrastive_loss * 0 # * 0.01 # increase when fixed
 
                 # Backpropagation
                 optimizer.zero_grad()
