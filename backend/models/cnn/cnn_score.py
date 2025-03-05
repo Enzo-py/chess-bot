@@ -163,8 +163,8 @@ class ChessEmbedding(nn.Module):
         self.res1 = DepthwiseResBlock(13, 128, 3, 1, 1)   # (batch, 128, 8, 8)
         self.res2 = DepthwiseResBlock(128, 256, 3, 1, 1)  # (batch, 256, 8, 8)
         self.res3 = DepthwiseResBlock(256, 512, 3, 2, 1)  # (batch, 512, 4, 4)
-        self.res4 = DepthwiseResBlock(512, 512, 5, 2, 2)  # (batch, 512, 2, 2)
-        self.res5 = DepthwiseResBlock(512, 512, 3, 2, 1)  # (batch, 512, 1, 1)
+        self.res4 = DepthwiseResBlock(512, 512, 3, 2, 1)  # (batch, 512, 2, 2)
+        self.res5 = DepthwiseResBlock(512, 1024, 3, 2, 1)  # (batch, 512, 1, 1)
 
         # Heatmaps
         self.heatmap1 = HeatMap()
@@ -173,7 +173,7 @@ class ChessEmbedding(nn.Module):
         self.heatmap4 = HeatMap()
 
         # Final embedding projection
-        self.proj = nn.Linear(512 + 256, 512 + 256)   # Project concatenated output to fixed dim
+        self.proj = nn.Linear(1024 + 256, 512 + 256)   # Project concatenated output to fixed dim
         self.norm = nn.LayerNorm(512 + 256)
 
     def forward(self, x):
@@ -212,7 +212,8 @@ class Decoder(nn.Module):
 
         self.fc1 = nn.Linear(512 + 256, 1024)
         self.fc2 = nn.Linear(1024, 1024)
-        self.fc_board = nn.Linear(1024, 8*8*12)
+        self.fc_board_1 = nn.Linear(1024, 1024)
+        self.fc_board_2 = nn.Linear(1024, 8*8*12)
         
         self.fc_turn = nn.Linear(1024, 1)
 
@@ -226,7 +227,8 @@ class Decoder(nn.Module):
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x_board = self.fc_board(x)
+        x_board = F.relu(self.fc_board_1(x))
+        x_board = F.relu(self.fc_board_2(x))
         x_board = x_board.view(-1, 8, 8, 12)
 
         x_turn = self.fc_turn(x)

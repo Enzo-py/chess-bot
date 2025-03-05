@@ -64,5 +64,11 @@
         "type": "AI",
         "elo": 600,
         "games": []
+    },
+    {
+        "model": "Q-Learning AI",
+        "type": "AI",
+        "elo": 600,
+        "games": []
     }
 ]
