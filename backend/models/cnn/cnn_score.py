@@ -1,6 +1,6 @@
 import numpy as np
 from models.deep_engine import DeepEngine
-from models.cnn.cnn_toolbox import CrossAttention
+from models.cnn.cnn_toolbox import CrossAttention, CBAM, DepthwiseResBlock, RelativePositionalEncoding, SEAttention
 
 from src.chess.game import Game
 
@@ -102,44 +102,6 @@ class BoardEvaluator(nn.Module):
     def forward(self, x):
         x = self.MLP1(x)  # (batch, 256)
         return F.softmax(x, dim=1)
-    
-class DepthwiseResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
-        super().__init__()
-        
-        self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, groups=in_channels, bias=False)
-        self.pointwise = nn.Conv2d(in_channels, out_channels, 1, bias=False)
-        
-        self.norm = nn.BatchNorm2d(out_channels)
-        self.act = nn.GELU()
-        
-        self.residual = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=False)
-        
-    def forward(self, x):
-        res = self.residual(x)
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-
-        if x.shape[0] > 1: # BatchNorm requires batch size > 1
-            x = self.norm(x)
-        return self.act(x + res)
-
-class SEAttention(nn.Module):
-    def __init__(self, in_channels, reduction=4):
-        super().__init__()
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(in_channels, in_channels // reduction),
-            nn.ReLU(),
-            nn.Linear(in_channels // reduction, in_channels),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        b, c, _, _ = x.shape
-        w = self.pool(x).view(b, c)
-        w = self.fc(w).view(b, c, 1, 1)
-        return x * w
 
 class HeatMap(nn.Module):
     def __init__(self):
@@ -160,11 +122,20 @@ class HeatMap(nn.Module):
 class ChessEmbedding(nn.Module):
     def __init__(self):
         super().__init__()
-        self.res1 = DepthwiseResBlock(13, 128, 3, 1, 1)   # (batch, 128, 8, 8)
-        self.res2 = DepthwiseResBlock(128, 256, 3, 1, 1)  # (batch, 256, 8, 8)
-        self.res3 = DepthwiseResBlock(256, 512, 3, 2, 1)  # (batch, 512, 4, 4)
-        self.res4 = DepthwiseResBlock(512, 512, 3, 2, 1)  # (batch, 512, 2, 2)
-        self.res5 = DepthwiseResBlock(512, 1024, 3, 2, 1)  # (batch, 512, 1, 1)
+        self.pos_encoding = RelativePositionalEncoding(13) # avoid equivariance to translation
+
+        self.res1 = DepthwiseResBlock(13, 128, 3, 1, 1)
+        self.res2 = DepthwiseResBlock(128, 256, 3, 1, 1)
+        self.res3 = DepthwiseResBlock(256, 512, 3, 2, 1)
+        self.res4 = DepthwiseResBlock(512, 512, 3, 2, 1)
+        self.res5 = DepthwiseResBlock(512, 1024, 3, 2, 1)
+
+        # CBAM Attention
+        self.cbam1 = CBAM(128)
+        self.cbam2 = CBAM(256)
+        self.cbam3 = CBAM(512)
+        self.cbam4 = CBAM(512)
+        self.cbam5 = CBAM(1024)
 
         # Heatmaps
         self.heatmap1 = HeatMap()
@@ -172,38 +143,40 @@ class ChessEmbedding(nn.Module):
         self.heatmap3 = HeatMap()
         self.heatmap4 = HeatMap()
 
-        # Final embedding projection
-        self.proj = nn.Linear(1024 + 256, 512 + 256)   # Project concatenated output to fixed dim
-        self.norm = nn.LayerNorm(512 + 256)
+        self.proj = nn.Linear(1024 + 256, 1024)
+        self.norm = nn.LayerNorm(1024)
+        self.fc = nn.Linear(1024, 512 + 256)
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
-        x = x.permute(0, 3, 1, 2)  # (batch, 8, 8, 14) -> (batch, 14, 8, 8)
+        x = x.permute(0, 3, 1, 2)
+        # x = self.pos_encoding(x)
 
-        # Compute heatmaps
         heatmap1 = self.heatmap1(x)
         heatmap2 = self.heatmap2(x)
         heatmap3 = self.heatmap3(x)
         heatmap4 = self.heatmap4(x)
 
-        # CNN Feature Extraction
-        x = self.res1(x)
-        x = self.res2(x)
-        x = self.res3(x)
-        x = self.res4(x)
-        x = self.res5(x)  # (batch, 512, 1, 1)
+        # CNN + CBAM Attention
+        x = self.cbam1(self.res1(x))
+        x = self.cbam2(self.res2(x))
+        x = self.cbam3(self.res3(x))
+        x = self.dropout(x)
+        x = self.cbam4(self.res4(x))
+        x = self.cbam5(self.res5(x))
 
-        # Flatten outputs
-        x = x.view(x.shape[0], -1)  # (batch, 512)
-        heatmaps = torch.cat([heatmap1, heatmap2, heatmap3, heatmap4], dim=1)  # (batch, 4, 8, 8)
-        heatmaps = heatmaps.view(heatmaps.shape[0], -1)  # Flatten (batch, 4 * 8 * 8)
+        x = x.view(x.shape[0], -1)
+        heatmaps = torch.cat([heatmap1, heatmap2, heatmap3, heatmap4], dim=1)
+        heatmaps = heatmaps.view(heatmaps.shape[0], -1)
 
-        # Concatenate and project
-        x = torch.cat([x, heatmaps], dim=1)  # (batch, 512 + 4 * 8 * 8)
+        x = torch.cat([x, heatmaps], dim=1)
         x = self.proj(x)
         x = self.norm(x)
+        x = self.dropout(x)
+        x = self.fc(x)
 
-        return x  # Final embedding (batch, 512 + 256) 
-
+        return x
+    
 class Decoder(nn.Module):
     """from latent to board"""
 

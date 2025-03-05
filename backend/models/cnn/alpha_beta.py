@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn.functional as F
 
 from src.chess.simulation import Simulation
-from models.deep_engine import DeepEngine
+from models.deep_engine import DeepEngine, Game
 from models.cnn.cnn_score import BoardEvaluator, ChessEmbedding
 
 

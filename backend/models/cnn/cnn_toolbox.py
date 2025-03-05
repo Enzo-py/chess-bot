@@ -3,86 +3,122 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-class CBAMChannelAttention(nn.Module):
-    def __init__(self, in_channels, reduction=16):
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction=16, kernel_size=7):
         super().__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(in_channels, in_channels // reduction, bias=False),
-            nn.ReLU(),
-            nn.Linear(in_channels // reduction, in_channels, bias=False),
-        )
+        self.channel_fc1 = nn.Linear(channels, channels // reduction)
+        self.channel_fc2 = nn.Linear(channels // reduction, channels)
+        self.spatial_conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2)
+        self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
-    
-    def forward(self, x):
-        b, c, _, _ = x.size()
-        avg_out = self.fc(self.avg_pool(x).view(b, c)).view(b, c, 1, 1)
-        max_out = self.fc(self.max_pool(x).view(b, c)).view(b, c, 1, 1)
-        out = self.sigmoid(avg_out + max_out)
-        return x * out
 
-class CBAMSpatialAttention(nn.Module):
-    def __init__(self, kernel_size=7):
-        super().__init__()
-        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2, bias=False)
-        self.sigmoid = nn.Sigmoid()
-    
     def forward(self, x):
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
-        out = torch.cat([avg_out, max_out], dim=1)
-        out = self.conv(out)
-        return x * self.sigmoid(out)
+        batch, channels, _, _ = x.shape
+        
+        # Channel Attention
+        avg_pool = x.mean(dim=(2, 3))
+        # Flatten spatial dimensions and then take max along that dimension.
+        max_pool, _ = x.view(batch, channels, -1).max(dim=2)
+        fc = lambda pool: self.sigmoid(self.channel_fc2(self.relu(self.channel_fc1(pool))))
+        channel_attention = (fc(avg_pool) + fc(max_pool)).view(batch, channels, 1, 1)
 
-class SqueezeExcitation(nn.Module):
-    def __init__(self, in_channels, reduction=16):
+        # Spatial Attention
+        spatial_input = torch.cat([x.mean(dim=1, keepdim=True), x.max(dim=1, keepdim=True)[0]], dim=1)
+        spatial_attention = self.sigmoid(self.spatial_conv(spatial_input))
+
+        return x * channel_attention * spatial_attention  # Scale feature maps
+
+class SEAttention(nn.Module):
+    def __init__(self, in_channels, reduction=4):
         super().__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
-            nn.Linear(in_channels, in_channels // reduction, bias=False),
+            nn.Linear(in_channels, in_channels // reduction),
             nn.ReLU(),
-            nn.Linear(in_channels // reduction, in_channels, bias=False),
+            nn.Linear(in_channels // reduction, in_channels),
             nn.Sigmoid()
         )
-    
-    def forward(self, x):
-        # b, c, _, _ = x.size()
-        b = x.size(0)
-        c = x.size(1)
-        scale = self.fc(self.avg_pool(x).view(b, c)).view(b, c, 1, 1)
-        return x * scale
 
-class ResBlock(nn.Module):
-    def __init__(self, in_channels, hidden_dim, out_channels, kernel_size, stride=1, padding=0, attention=True):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, hidden_dim, kernel_size, stride, padding)
-        self.conv2 = nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(hidden_dim, out_channels, kernel_size=3, stride=1, padding=1)
-        self.relu = nn.ReLU()
-        self.res_connection = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
-        
-        self.attention = attention
-        if attention:
-            self.channel_attention = CBAMChannelAttention(out_channels)
-            self.spatial_attention = CBAMSpatialAttention()
-    
     def forward(self, x):
-        residual = self.res_connection(x)
-        x = self.conv1(x)
-        x = self.relu(x)
-        x = self.conv2(x)
-        x = self.relu(x)
-        x = self.conv3(x)
-        x += residual
-        x = self.relu(x)
+        b, c, _, _ = x.shape
+        w = self.pool(x).view(b, c)
+        w = self.fc(w).view(b, c, 1, 1)
+        return x * w
+
+class DepthwiseResBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, norm_type='batch'):
+        super().__init__()
         
-        if self.attention:
-            x = self.channel_attention(x)
-            x = self.spatial_attention(x)
+        self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, groups=in_channels, bias=False)
+        self.pointwise = nn.Conv2d(in_channels, out_channels, 1, bias=False)
+
+        if norm_type == 'batch':
+            self.norm = nn.BatchNorm2d(out_channels)
+        elif norm_type == 'group':
+            self.norm = nn.GroupNorm(num_groups=out_channels // 16 if out_channels >= 16 else 1, num_channels=out_channels)
+        elif norm_type == 'layer':
+            self.norm = nn.LayerNorm([out_channels, 1, 1])  # Normalize across channels
+
+        self.act = nn.SiLU()  # Swish activation (better for CNNs)
         
-        return x
+        # Residual Connection: Match dimensions if needed
+        self.use_residual = (in_channels == out_channels and stride == 1)
+        self.residual = nn.Identity() if self.use_residual else nn.Conv2d(in_channels, out_channels, 1, stride, bias=False)
+
+    def forward(self, x):
+        res = self.residual(x)
+        
+        x = self.depthwise(x)
+        x = self.pointwise(x)
+        x = self.norm(x)
+        x = self.act(x)
+        
+        return x + res if self.use_residual else x
+
+class RelativePositionalEncoding(nn.Module):
+    """Use in AlphaZero-style models"""
+    def __init__(self, channels, height=8, width=8):
+        super().__init__()
+        self.channels = channels
+        self.height = height
+        self.width = width
+
+        # Split channels: c_x + c_y == channels
+        c_x = channels // 2         # e.g. for 13 -> 6
+        c_y = channels - c_x        # e.g. for 13 -> 7
+
+        # Create learnable embedding tables for relative positions
+        self.rel_emb_x = nn.Parameter(torch.randn(width * 2 - 1, c_x))  # Relative X embedding table
+        self.rel_emb_y = nn.Parameter(torch.randn(height * 2 - 1, c_y))  # Relative Y embedding table
+
+    def forward(self, x):
+        B, C, H, W = x.shape  # Expected: (batch, channels, height, width)
+        
+        # Create relative coordinate indices
+        # Ensure these tensors are on the same device as x
+        device = x.device
+        coord_x = torch.arange(W, device=device).view(1, -1) - torch.arange(W, device=device).view(-1, 1)  # (W, W)
+        coord_y = torch.arange(H, device=device).view(1, -1) - torch.arange(H, device=device).view(-1, 1)  # (H, H)
+
+        # Normalize indices into range [0, 2W-2] and [0, 2H-2]
+        coord_x = coord_x + (W - 1)
+        coord_y = coord_y + (H - 1)
+
+        # Get relative embeddings from the learned tables and reshape:
+        # rel_x: (H, W, c_x)
+        rel_x = self.rel_emb_x[coord_x.view(-1)].view(H, W, -1)
+        # rel_y: (H, W, c_y)
+        rel_y = self.rel_emb_y[coord_y.view(-1)].view(H, W, -1)
+
+        # Concatenate both embeddings along the last dimension so total channels == c_x + c_y == channels
+        rel_pos = torch.cat([rel_x, rel_y], dim=-1)  # (H, W, channels)
+
+        # Permute to (1, channels, H, W) for broadcasting over the batch
+        rel_pos = rel_pos.permute(2, 0, 1).unsqueeze(0)  # (1, channels, H, W)
+
+        # Add the relative positional encoding to the input features
+        return x + rel_pos.to(x.device)
+
 
 class PositionalEncoding(nn.Module):
     """2D Positional Encoding for Chess Board (8x8)"""
