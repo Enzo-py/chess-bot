@@ -58,7 +58,7 @@ class GreedyAI(Engine):
 
         # Capture evaluation (favor good trades)
         if captured_piece:
-            value += self.game.PIECE_VALUES[captured_piece.piece_type] * 8
+            value += self.game.PIECE_VALUES[captured_piece.piece_type] * 9
 
         # Avoid moving the same piece twice in a row (unless it's a strong move)
         if self.last_move_piece == piece_type:
@@ -97,6 +97,10 @@ class GreedyAI(Engine):
             # encourage moving * 2 pawns
             if abs(chess.square_rank(from_square) - chess.square_rank(to_square)) == 2:
                 value += 1
+
+            # encourage moving pawn in endgame
+            if len(board.pieces(chess.PAWN, color)) < 4 and len(board.pieces(chess.QUEEN, color)) == 0:
+                value += 6
 
         elif piece_type == chess.KNIGHT:
             value += 3

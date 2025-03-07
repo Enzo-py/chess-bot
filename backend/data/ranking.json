@@ -18,6 +18,12 @@
         "games": []
     },
     {
+        "name": "Luis",
+        "type": "player",
+        "elo": 600,
+        "games": []
+    },
+    {
         "model": "Random AI",
         "type": "AI",
         "elo": 600,
@@ -49,6 +55,18 @@
     },
     {
         "model": "Score CNN",
+        "type": "AI",
+        "elo": 600,
+        "games": []
+    },
+    {
+        "model": "Tree Search CNN",
+        "type": "AI",
+        "elo": 600,
+        "games": []
+    },
+    {
+        "model": "Q-Learning AI",
         "type": "AI",
         "elo": 600,
         "games": []

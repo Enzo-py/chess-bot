@@ -98,7 +98,7 @@ class DeepEngine(Engine):
         self.is_setup = False
     
         self.auto_save_version = None
-        self._train_config = {"mode": None, "head": None, "UI": None, "auto_save": False}
+        self._train_config = {"mode": None, "head": None, "UI": None, "auto_save": False, "load_policy": "all"}
 
     def __or__(self, other: TrainConfigBase) -> TrainConfig:
         """Permet d'enchaîner les configurations avec `|` et retourne le bon type."""
@@ -157,7 +157,7 @@ class DeepEngine(Engine):
         elif head_name == "encoder":
             self.module.embedding = head
         elif head_name == "decoder":
-            self.module.generative_head = head
+            self.module.decoder = head
 
         self.module.to(self.module.device)
 
@@ -344,7 +344,7 @@ class DeepEngine(Engine):
         :param loader: loader to use to get the games
         :type loader: Loader
 
-        :return: total_loss, contrastive_loss, embedding_loss, classification_loss
+        :return: total_loss, contrastive_loss, classification_loss
         :rtype: tuple[list[float], list[float], list[float], list[float]]
         """
 
@@ -360,13 +360,11 @@ class DeepEngine(Engine):
 
         all_total_loss = []
         all_contrastive_loss = []
-        all_embedding_loss = []
         all_classification_loss = []
 
         for epoch in range(epochs):
             total_loss = 0
             contrastive_loss_total = 0
-            embedding_loss_total = 0
             classification_loss_total = 0
 
             if loader and loader.need_update(epoch):
@@ -393,13 +391,10 @@ class DeepEngine(Engine):
                 classification_loss = F.binary_cross_entropy(probs, batch_win_probs)
 
                 # Compute contrastive loss (make embeddings for original and flipped boards similar)
-                contrastive_loss = self.embedding_contrastive_loss(embeddings, embeddings_t)
-
-                # Compute embedding loss (optional: regularization for stable embeddings)
-                embedding_loss = torch.mean(torch.norm(embeddings, dim=-1))  # L2 norm regularization
+                contrastive_loss = self._contrastive_loss(probs, probs_t)
 
                 # Total loss
-                loss = classification_loss + 0.15 * contrastive_loss + 0.01 * embedding_loss
+                loss = classification_loss + 0.15 * contrastive_loss
 
                 # Backpropagation
                 optimizer.zero_grad()
@@ -408,24 +403,28 @@ class DeepEngine(Engine):
 
                 total_loss += loss.item()
                 contrastive_loss_total += contrastive_loss.item()
-                embedding_loss_total += embedding_loss.item()
                 classification_loss_total += classification_loss.item()
 
             all_total_loss.append(total_loss / num_batches)
             all_contrastive_loss.append(contrastive_loss_total / num_batches)
-            all_embedding_loss.append(embedding_loss_total / num_batches)
             all_classification_loss.append(classification_loss_total / num_batches)
 
             if self._train_config["UI"] == 'prints':
                 l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Contrastive Loss: {contrastive_loss_total / num_batches:.2f}, " 
-                l2 = f"  Embedding Loss: {embedding_loss_total / num_batches:.2f} Classification Loss: {classification_loss_total / num_batches:.2f}"
+                l2 = f"  Classification Loss: {classification_loss_total / num_batches:.2f}"
                 l1 = Style("INFO", f"{l1: <{TrainConfig.line_length-2}}")
                 l2 = Style("INFO", f"{l2: <{TrainConfig.line_length-2}}")
                 print(f"| {l1} |")
                 print(f"| {l2} |")
                 print(f"| {'': <{TrainConfig.line_length-2}} |")
 
-        return all_total_loss, all_contrastive_loss, all_embedding_loss, all_classification_loss
+            if self._train_config["auto_save"]:
+                if self.auto_save_version is None:
+                    files = [f for f in os.listdir("backend/models/saves") if self.__class__.__name__ in f and "auto-save" in f]
+                    self.auto_save_version = len(files)
+                self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
+
+        return all_total_loss, all_contrastive_loss, all_classification_loss
 
     def _train_encoder(self, epochs: int, batch_size, games: list[Game], loader: Loader = None):
         """
@@ -462,19 +461,22 @@ class DeepEngine(Engine):
                 batch_games_t = [game.reverse() for game in batch_games]
 
                 # predict the moves
-                one_hot, turns, decoded_one_hot, decoded_turns, latent = self.module(batch_games, head="encoder")
+                one_hot, turns, decoded_one_hot_logits, decoded_turns, latent = self.module(batch_games, head="encoder")
                 _, _, _, _, latent_t = self.module(batch_games_t, head="encoder")
 
-                # flatten the one_hot 
-                one_hot = one_hot.view(one_hot.shape[0], -1)
-                decoded_one_hot = decoded_one_hot.view(decoded_one_hot.shape[0], -1)
-
                 # Compute loss
-                loss_one_hot = F.binary_cross_entropy_with_logits(decoded_one_hot, one_hot) 
-                loss_turn = F.binary_cross_entropy_with_logits(decoded_turns, turns)
-                contrastive_loss = self.embedding_contrastive_loss(latent, latent_t)
+                decoded_one_hot_logits = decoded_one_hot_logits.view(-1, 12)
+                one_hot = one_hot.view(-1, 12)  # Flatten one-hot target
+                target_labels = one_hot.argmax(dim=-1)  # Shape: [batch_size]
 
-                loss = loss_one_hot + loss_turn + contrastive_loss * 0.15
+                one_hot_target = torch.zeros_like(decoded_one_hot_logits)  # Create a tensor of zeros with the same shape as logits
+                one_hot_target.scatter_(1, target_labels.view(-1, 1), 1)  # Fill the tensor with 1s at the target indices   
+                
+                loss_one_hot = F.binary_cross_entropy_with_logits(decoded_one_hot_logits, one_hot_target)
+                loss_turn = F.binary_cross_entropy_with_logits(decoded_turns, turns)
+                contrastive_loss = self._contrastive_loss(latent, latent_t) # fondamentally not totally correct cuz color inversion latent + color inversion = latent_t but we don't add the vector color inversion should be fixe
+
+                loss = loss_one_hot + loss_turn + contrastive_loss * 0 # * 0.01 # increase when fixed
 
                 # Backpropagation
                 optimizer.zero_grad()
@@ -575,12 +577,17 @@ class DeepEngine(Engine):
                 targets = [moves_dict[self.encode_move(move)] for move in batch_best_moves]
                 targets = torch.tensor(targets, dtype=torch.long, device=self.module.device)
 
+                targets_t = [moves_dict[self.encode_move(move)] for move in batch_best_moves_t]
+                targets_t = torch.tensor(targets_t, dtype=torch.long, device=self.module.device)
+
                 # Compute loss: 1 to increase the prob of the best move, 0 for the others
                 best_move_loss = criterion(predictions, targets)
+                best_move_t_loss = criterion(predictions_t, targets_t)
+                best_move_loss = (best_move_loss + best_move_t_loss) / 2
 
                 # Compute a loss about legals move (1 if legal 0 if not)
-                legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]
-                legal_moves = [[1 if i in t else 0 for i in range(len(moves_dict))] for t in legal_moves]
+                all_legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]
+                legal_moves = [[int(i in legal_moves) for i in range(64*64*5)] for legal_moves in all_legal_moves]
                 legal_moves = torch.tensor(legal_moves, dtype=torch.float, device=self.module.device)
                 legal_loss = legal_criterion(predictions.float(), legal_moves.float())
                 num_legal_moves = legal_moves.sum(dim=1, keepdim=True).clamp(min=1)
@@ -588,23 +595,24 @@ class DeepEngine(Engine):
 
                 # Compute contrastive loss
                 contrastive_weight = 0.1 if epoch > 4 else 0 # warmup
-                contrastive_loss = self.embedding_contrastive_loss(embeddings, embeddings_t) * contrastive_weight
+                # contrastive loss have to be fixed: see train on encoder
+                # contrastive_loss = self._contrastive_loss(embeddings, embeddings_t) * contrastive_weight
 
                 # Backpropagation
                 optimizer.zero_grad()
-                loss = best_move_loss + legal_loss + contrastive_loss
+                loss = best_move_loss + legal_loss #+ contrastive_loss
                 loss.backward()
                 optimizer.step()
 
                 total_loss += loss.item()
                 total_legal_loss += legal_loss.item()
                 total_best_move_loss += best_move_loss.item()
-                total_contrastive_loss += contrastive_loss.item()
+                # total_contrastive_loss += contrastive_loss.item()
 
             all_total_loss.append(total_loss / num_batches)
             all_legal_loss.append(total_legal_loss / num_batches)
             all_best_move_loss.append(total_best_move_loss / num_batches)
-            all_contrastive_loss.append(total_contrastive_loss / num_batches)
+            # all_contrastive_loss.append(total_contrastive_loss / num_batches)
 
             if self._train_config["UI"] == 'prints':
                 l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Best Move Loss: {total_best_move_loss / num_batches:.2f}, Contrastive loss {total_contrastive_loss / num_batches:.2f}" 
@@ -677,8 +685,12 @@ class DeepEngine(Engine):
         for i, game in enumerate(games):
             # 1. flatten the one_hot
             one_hot_i = one_hot[i].view(-1)
-            decoded_one_hot_i = decoded_one_hot[i].view(-1)
-            decoded_one_hot_i = torch.round(decoded_one_hot_i)
+            decoded_one_hot_i_logits = decoded_one_hot[i].view(-1) # return logits
+
+            # logits to one_hot
+            max_indices = torch.argmax(decoded_one_hot_i_logits, dim=-1)  # Shape: (b, 8, 8, 13)
+            decoded_one_hot_i = torch.zeros_like(decoded_one_hot_i_logits)
+            decoded_one_hot_i.scatter_(-1, max_indices.unsqueeze(-1), 1)
 
             # 2. compare the one_hot and the decoded_one_hot
             correct_predictions += (one_hot_i == decoded_one_hot_i).sum().item()
@@ -713,21 +725,21 @@ class DeepEngine(Engine):
             l = Style("SECONDARY_INFO", f"{l: <{TrainConfig.line_length-2}}")
             print(f"| {l} |")
 
-    def embedding_contrastive_loss(self, emb_orig, emb_rev):
+    def _contrastive_loss(self, origin, rev):
         """
-        Compute contrastive loss for embeddings from two views (original and reversed games).
-        emb_orig: Tensor of shape [batch_size, embed_dim]
-        emb_rev: Tensor of shape [batch_size, embed_dim]
+        Compute contrastive loss from two views (original and reversed games).
+        origin: Tensor of shape [batch_size, embed_dim]
+        rev: Tensor of shape [batch_size, embed_dim]
         """
-        batch_size = emb_orig.shape[0]
-        device = emb_orig.device
+        batch_size = origin.shape[0]
+        device = origin.device
 
         # Normalize embeddings for cosine similarity
-        emb_orig = F.normalize(emb_orig, dim=1)  # [batch_size, embed_dim]
-        emb_rev = F.normalize(emb_rev, dim=1)  # [batch_size, embed_dim]
+        origin = F.normalize(origin, dim=1)  # [batch_size, embed_dim]
+        rev = F.normalize(rev, dim=1)  # [batch_size, embed_dim]
 
         # Compute cosine similarity between all (orig, rev) pairs
-        similarity_matrix = torch.einsum("bd,cd->bc", emb_orig, emb_rev)  # [batch_size, batch_size]
+        similarity_matrix = torch.einsum("bd,cd->bc", origin, rev)  # [batch_size, batch_size]
 
         # Use a learnable temperature parameter (default: 0.07)
         if not hasattr(self, "temperature"):
@@ -857,9 +869,14 @@ class DeepEngineModule(nn.Module):
             scores = self.generative_head(embedding)
         elif head == "encoder":
             decoded_one_hots, decoded_turns = self.decoder(embedding)
+            if isinstance(embedding, tuple):
+                return one_hots, turns, decoded_one_hots, decoded_turns, embedding[0]
             return one_hots, turns, decoded_one_hots, decoded_turns, embedding
         else:
             raise ValueError(f"Invalid head: {head}")
+        
+        if isinstance(embedding, tuple): # allow to work with rich embeddings
+            return scores, embedding[0]
 
         return scores, embedding  
         

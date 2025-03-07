@@ -111,10 +111,10 @@ class Game:
     def _load_fen(self, fen):
         self.board = chess.Board(fen)
         self.draw = self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.is_seventyfive_moves() or self.board.is_fivefold_repetition()
-        self.checkmate = self.board.is_checkmate()
         self.king_in_check = {chess.WHITE: self.board.is_check() and self.board.turn == chess.WHITE, chess.BLACK: self.board.is_check() and self.board.turn == chess.BLACK}
         self.last_player = chess.WHITE if self.board.turn == chess.BLACK else chess.BLACK
-
+        self.is_checkmate = self.last_player if self.board.is_checkmate() else None
+        self.winner = self.last_player if self.board.is_checkmate() else None
         return self
     
     def _load_pgn(self, pgn_string):
@@ -409,7 +409,7 @@ class Game:
         return self
 
     def is_game_over(self):
-        return self.checkmate is not None or self.draw is not None
+        return self.checkmate is not None or self.draw
     
     @staticmethod
     def reverse_move(uci_move):

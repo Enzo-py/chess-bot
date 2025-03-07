@@ -9,7 +9,7 @@ class SunfishAI(Engine):
     Implementation of Sunfish chess algorithm within the Engine framework.
     """
 
-    __author__ = "Shashuat ..."
+    __author__ = "Shashwat SHARMA"
     __description__ = "Chess AI that uses the Sunfish engine."
     
     def __init__(self, *args, **kwargs):

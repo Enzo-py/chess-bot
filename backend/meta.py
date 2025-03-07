@@ -4,7 +4,9 @@ from models.greedy.greedy_exploration import GreedyExplorationAI
 from models.downloaded.stockfish import StockfishAI
 from models.rl.alpha_beta import SunfishAI
 from models.rl.mcts import MonteCarloAI
+from models.rl.q_learning import QLearningAI
 from models.cnn.cnn_score import CNNScore
+from models.cnn.tree_search_cnn import TreeSearchCNN
 from models.rl.td import TDLearningAI
 from models.cnn2.cnn_score2 import CNNScore2
 
@@ -15,7 +17,9 @@ AVAILABLE_MODELS = {
     "Stockfish AI": StockfishAI,
     "Sunfish AI": SunfishAI,
     "MCTS AI": MonteCarloAI,
+    "Q-Learning AI": QLearningAI,
     "Score CNN": CNNScore,
+    "Tree Search CNN": TreeSearchCNN,
     "Score CNN2": CNNScore2,
     "TD Learning AI": TDLearningAI,
 }

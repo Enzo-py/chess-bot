@@ -7,7 +7,7 @@ class Embedding(nn.Module):
     def __init__(self):
         super(Embedding, self).__init__()
 
-        self.conv0 = nn.Conv2d(in_channels=13, out_channels=64, kernel_size=3, padding=1) # [b, 8, 8, 14] -> [b, 8, 8, 64]
+        self.conv0 = nn.Conv2d(in_channels=13, out_channels=64, kernel_size=3, padding=1) # [b, 8, 8, 13] -> [b, 8, 8, 64]
         self.conv1 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=8) # [b, 8, 8 14] -> [b, 1, 1, 64]
 
         self.dropout = nn.Dropout(0.3)
@@ -58,6 +58,9 @@ class DefaultDecoder(nn.Module):
         x: [batch_size, 256]
         """
 
+        if isinstance(x, tuple):
+            x = x[0]
+
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x_board = self.fc_board(x)
@@ -83,7 +86,6 @@ class DefaultScoreHead(nn.Module):
         x = self.fc2(x)
         return x
     
-  
 class DefaultGenerativeHead(nn.Module):
     
     def __init__(self, *args, **kwargs):

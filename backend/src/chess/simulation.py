@@ -31,17 +31,31 @@ class Simulation:
 
     def run(self, engine: type, depth=1, play_args: dict = {}):
         engineA, engineB = engine(), engine()
-        engineA.game, engineA.color = self.game, chess.WHITE
-        engineB.game, engineB.color = self.game, chess.BLACK
+        engineA.game, engineA.color, engineA.shallow = self.game, chess.WHITE, True
+        engineB.game, engineB.color, engineB.shallow = self.game, chess.BLACK, True
 
-        for _ in range(depth):
-            move = engineA.play(**play_args) if self.game.board.turn == chess.WHITE else engineB.play(**play_args)
-            if not move:
-                return
+        engineA.setup()
+        engineB.setup()
 
-            if isinstance(move, list) and move:
-                move = random.choice(move)
+        if depth == -1: # play until the end
+            while not self.game.is_game_over():
+                move = engineA.play(**play_args) if self.game.board.turn == chess.WHITE else engineB.play(**play_args)
+                if not move:
+                    return
 
-            self.game.move(move)
-            if self.game.is_game_over():
-                return
+                if isinstance(move, list) and move:
+                    move = random.choice(move)
+
+                self.game.move(move)
+        else:
+            for _ in range(depth):
+                move = engineA.play(**play_args) if self.game.board.turn == chess.WHITE else engineB.play(**play_args)
+                if not move:
+                    return
+
+                if isinstance(move, list) and move:
+                    move = random.choice(move)
+
+                self.game.move(move)
+                if self.game.is_game_over():
+                    return
