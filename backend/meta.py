@@ -5,6 +5,8 @@ from models.downloaded.stockfish import StockfishAI
 from models.rl.alpha_beta import SunfishAI
 from models.rl.mcts import MonteCarloAI
 from models.cnn.cnn_score import CNNScore
+from models.rl.td import TDLearningAI
+from models.cnn2.cnn_score2 import CNNScore2
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
@@ -14,6 +16,8 @@ AVAILABLE_MODELS = {
     "Sunfish AI": SunfishAI,
     "MCTS AI": MonteCarloAI,
     "Score CNN": CNNScore,
+    "Score CNN2": CNNScore2,
+    "TD Learning AI": TDLearningAI,
 }
 """
 This dictionary exposes all the models that are available for testing or using in the interface.

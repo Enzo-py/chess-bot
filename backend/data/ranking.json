@@ -52,5 +52,17 @@
         "type": "AI",
         "elo": 600,
         "games": []
+    },
+    {
+        "model": "TD Learning AI",
+        "type": "AI",
+        "elo": 600,
+        "games": []
+    },
+    {
+        "model": "Score CNN2",
+        "type": "AI",
+        "elo": 600,
+        "games": []
     }
 ]

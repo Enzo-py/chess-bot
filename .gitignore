@@ -179,3 +179,5 @@ backend/data/lichess_db_standard_rated_2013-04.pgn.zst
 backend/data/lichess_db_puzzle.csv.zst
 
 backend/models/saves/*
+
+backend/data/syzygy_tablebases/*
