@@ -22,7 +22,7 @@ class TransformerScore(DeepEngine):
     Transformer-based AI that scores the board state.
     """
 
-    __author__ = "Luis Wiedmann"
+    __author__ = "AI Assistant"
     __description__ = "Transformer-based AI that scores the board state."
         
     def __init__(self):
