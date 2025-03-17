@@ -6,7 +6,7 @@
         "nb_games": 11
     },
     {
-        "model": "Sunfish AI",
+        "model": "AlphaBetaSearchAI",
         "type": "AI",
         "elo": 658,
         "nb_games": 10
