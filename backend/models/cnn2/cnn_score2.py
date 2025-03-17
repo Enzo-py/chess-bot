@@ -1,5 +1,6 @@
 import numpy as np
 from models.deep_engine import DeepEngine
+from models.cnn.cnn_score import BoardEvaluator, GenerativeHead, ChessEmbedding, Decoder
 from models.cnn.cnn_toolbox import CrossAttention, CBAM, DepthwiseResBlock, RelativePositionalEncoding, SEAttention
 
 from src.chess.game import Game
@@ -35,12 +36,15 @@ class CNNScore2(DeepEngine):
     CNN-based AI that scores the board state.
     """
 
+    __author__ = "Matt"
     __author__ = "Enzo Pinchon & Matt"
     __description__ = "CNN-based AI that scores the board state."
+    __weights__ = "CNNScore"
         
     def __init__(self):
         super().__init__()
 
+        self.set(head_name="board_evaluation", head=BoardEvaluator())
         self.set(head_name="board_evaluation", head=BoardEvaluator())
         self.set(head_name="generative", head=GenerativeHead())
         self.set(head_name="encoder", head=ChessEmbedding())

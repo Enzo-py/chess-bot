@@ -157,8 +157,7 @@ class Server:
         # a model is an evaluator if it has a 'evaluate' method
         evaluators = []
         for name, model in AVAILABLE_MODELS.items():
-            try: getattr(model, "evaluate")
-            except: continue
+            if not hasattr(model, "evaluate"): continue
 
             evaluators.append({
                 "name": name,
@@ -280,7 +279,7 @@ class Server:
 
         for model in AVAILABLE_MODELS:
             if model not in [ai["model"] for ai in ais]:
-                ais.append({"model": model, "type": "AI", "elo": 600, "games": []})
+                ais.append({"model": model, "type": "AI", "elo": 600, "nb_games": 0})
 
         all_players = players + ais
         all_players = sorted(all_players, key=lambda x: x["elo"], reverse=True)
@@ -309,7 +308,7 @@ class Server:
             "name": info['name'],
             "type": "player",
             "elo": 600,
-            "games": []
+            "nb_games": 0
         })
         json.dump(ranking, self.open_file("ranking", "w"), indent=4)
         asyncio.create_task(self.server.broadcast(protocol.Message("player-created", "Player created").to_json()))

@@ -26,8 +26,8 @@ class TreeSearchCNN(DeepEngine):
 
         # Exploration parameters:
         self.exploration_size = 5         # Number of top candidate moves
-        self.exploration_depth = 14         # Simulation depth
-        self.exploration_sample = 200      # Number of simulation samples per candidate move
+        self.exploration_depth = 2         # Simulation depth
+        self.exploration_sample = 10      # Number of simulation samples per candidate move
         self.confidence = 50               # Confidence parameter for Beta distribution
         # Ensure even number of samples (if needed by your logic)
         assert self.exploration_sample % 2 == 0, "Exploration sample must be even"

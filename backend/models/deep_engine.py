@@ -80,6 +80,7 @@ class DeepEngine(Engine):
 
     __author__ = "Enzo Pinchon"
     __description__ = "Deep Engine"
+    __weights__ = None
 
     PROMOTION_TABLE = {
         None: 0,
@@ -108,10 +109,12 @@ class DeepEngine(Engine):
         """
         Setup the model.
         """
-        path = "./models/saves/" + self.__class__.__name__ + ".active.pth"
+        name = self.__class__.__name__ if getattr(self, "__weights__") is None else self.__weights__
+        path = "./models/saves/" + name + ".active.pth"
         if os.path.exists(path):
             self.load(path)
             self.is_setup = True
+            self.module.set_device()
         else:
             raise FileNotFoundError(f"Model not found at {path}")
         
@@ -761,7 +764,8 @@ class DeepEngine(Engine):
         """
         self.module.eval()
         with torch.no_grad():
-            scores, _ = self.module([self.game, self.game], head=head) # 2 views of the same game for batchnorm
+            scores = self.module([self.game, self.game], head=head) # 2 views of the same game for batchnorm
+            if type(scores) is tuple: scores = scores[0]
         if head == "generation":
             return scores.tolist()[0]
         else:

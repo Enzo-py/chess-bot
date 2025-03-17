@@ -4,7 +4,7 @@ import time
 from collections import namedtuple
 from itertools import count
 
-class SunfishAI(Engine):
+class AlphaBetaSearchAI(Engine):
     """
     Implementation of Sunfish chess algorithm within the Engine framework.
     """
