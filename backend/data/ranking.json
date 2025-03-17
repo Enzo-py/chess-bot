@@ -66,6 +66,12 @@
         "nb_games": 0
     },
     {
+        "model": "ScratchFish AI",
+        "type": "AI",
+        "elo": 600,
+        "nb_games": 0
+    },
+    {
         "model": "Score CNN",
         "type": "AI",
         "elo": 597,

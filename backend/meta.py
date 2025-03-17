@@ -3,6 +3,7 @@ from models.greedy.greedy_ai import GreedyAI
 from models.greedy.greedy_exploration import GreedyExplorationAI
 from models.downloaded.stockfish import StockfishAI
 from models.rl.alpha_beta import AlphaBetaSearchAI
+from models.rl.scratchfish import ScratchFishAI
 from models.rl.mcts import MonteCarloAI
 from models.rl.q_learning import QLearningAI
 from models.cnn.cnn_score import CNNScore
@@ -19,6 +20,7 @@ AVAILABLE_MODELS = {
     "GreedyExploration AI": GreedyExplorationAI,
     "Stockfish AI": StockfishAI,
     "AlphaBetaSearchAI": AlphaBetaSearchAI,
+    "ScratchFish AI": ScratchFishAI,
     "MCTS AI": MonteCarloAI,
     "Q-Learning AI": QLearningAI,
     "Score CNN": CNNScore,
