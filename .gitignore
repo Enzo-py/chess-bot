@@ -181,5 +181,3 @@ backend/data/lichess_db_puzzle.csv.zst
 backend/models/saves/*
 
 backend/data/syzygy_tablebases/*
-
-backend\models\cnn2\cnn_score2.py
