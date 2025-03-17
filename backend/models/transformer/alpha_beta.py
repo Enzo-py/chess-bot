@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from src.chess.simulation import Simulation
 from models.deep_engine import DeepEngine, Game
-from models.transformer.transformer import ChessTransformerEncoder, BoardEvaluator
+from models.transformer.transformer import ChessTransformerEncoder, BoardEvaluator, GenerativeHead, Decoder
 
 
 class AlphaBetaTransformerEngine(DeepEngine):
@@ -15,6 +15,7 @@ class AlphaBetaTransformerEngine(DeepEngine):
     """
     __author__ = "Luis Wiedmann"
     __description__ = "AlphaBeta search with Transformer evaluation using DeepEngine framework"
+    __weights__ = "TransformerScore"
 
     def __init__(self, max_depth=3, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -22,8 +23,10 @@ class AlphaBetaTransformerEngine(DeepEngine):
         self.max_depth = max_depth
 
         # Use the transformer components
-        self.set(head_name="encoder", head=ChessTransformerEncoder())
         self.set(head_name="board_evaluation", head=BoardEvaluator())
+        self.set(head_name="generative", head=GenerativeHead())
+        self.set(head_name="encoder", head=ChessTransformerEncoder())
+        self.set(head_name="decoder", head=Decoder())
 
     def evaluate_board(self, game):
         """

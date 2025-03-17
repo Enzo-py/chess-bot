@@ -12,7 +12,8 @@ class TreeSearchTransformer(DeepEngine):
     """
     __author__ = "Luis Wiedmann"
     __description__ = "Transformer-based AI that uses tree search with board evaluation."
-        
+    __weights__ = "TransformerScore"
+ 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.set(head_name="board_evaluation", head=BoardEvaluator())
@@ -22,14 +23,13 @@ class TreeSearchTransformer(DeepEngine):
 
         # Configuration parameters
         self.top_proba = 0.35  # Consider moves that make up top 35% of probability mass
-        self.temperature = 1.0  # Temperature for softmax, higher = more exploration
+        self.temperature = 1.1  # Temperature for softmax, higher = more exploration
         self.shallow = False    # If True, don't use tree search, just pick from probabilities
 
         # Exploration parameters:
-        self.exploration_size = 5       # Number of top candidate moves to explore
-        self.exploration_depth = 14     # Simulation depth for look-ahead
-        self.exploration_sample = 200   # Number of simulation samples per candidate move
-        self.confidence = 50            # Confidence parameter for Beta distribution
+        self.exploration_depth = 3      # Simulation depth for look-ahead
+        self.exploration_sample = 100   # Number of simulation samples per candidate move
+        self.confidence = 55            # Confidence parameter for Beta distribution
         
         # Ensure even number of samples (for balanced simulation)
         assert self.exploration_sample % 2 == 0, "Exploration sample must be even"
@@ -48,7 +48,7 @@ class TreeSearchTransformer(DeepEngine):
         
         # Get logits for each legal move from the generative head
         logits = [
-            self.predict(head="generative")[self.encode_move(move, as_int=True)]
+            self.predict(head="generation")[self.encode_move(move, as_int=True)]
             for move in legal_moves
         ]
         
@@ -125,14 +125,14 @@ class TreeSearchTransformer(DeepEngine):
                 sm.game.move(move)
                 
                 # Run a simulation with this move to see how it plays out
-                sm.run(engine=TreeSearchTransformer, depth=-1)
+                sm.run(engine=TreeSearchTransformer, depth=self.exploration_depth)
                 
                 # Score based on outcome (weighted by the move's prior probability)
                 # -1 if we're checkmated, +1 if opponent is checkmated, 0 otherwise
                 if self.game.checkmate == self.color:
-                    move_score[i] = -1  # We lost
+                    move_score[i] = -300  # We lost
                 elif self.game.checkmate == (not self.color):
-                    move_score[i] = 1   # We won
+                    move_score[i] = 600  # We won
                 else:
                     move_score[i] = 0   # Draw or ongoing
                     

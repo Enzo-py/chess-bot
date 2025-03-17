@@ -326,25 +326,26 @@
                 </div>
             `
                         
-            pop_up = pop_up_showcase(content);
+            let pop_up = pop_up_showcase(content);
             pop_up = d3.select(pop_up)
-            console.log("Pop-up", pop_up.select("#evaluator2"));
 
             send_message("get-evaluators-list", {}, true, "Getting evaluators list...");
             wait_for_message("evaluators-list", 1000).then((data) => {
                 data = data.data.message // [{name: ..., description: ..., elo: ...}]
                 console.log("Evaluators list", data);
+                console.log("Pop-up", pop_up.select("#evaluator1"));
+
                 pop_up.select("#evaluator1")
+                    .selectAll("option")
                     .data(data)
-                    .join()
-                    .append("option")
+                    .join("option")
                     .attr("value", d => d.name)
                     .text(d => `${d.name} - ${d.elo} ELO`);
 
                 pop_up.select("#evaluator2")
+                    .selectAll("option")
                     .data(data)
-                    .join()
-                    .append("option")
+                    .join("option")
                     .attr("value", d => d.name)
                     .text(d => `${d.name} - ${d.elo} ELO`);
             }).catch((error) => {

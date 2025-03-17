@@ -1,86 +1,98 @@
 [
     {
+        "model": "Random AI",
+        "type": "AI",
+        "elo": 667,
+        "nb_games": 11
+    },
+    {
         "model": "Sunfish AI",
         "type": "AI",
-        "elo": 690,
-        "games": []
+        "elo": 658,
+        "nb_games": 10
+    },
+    {
+        "model": "Greedy AI",
+        "type": "AI",
+        "elo": 612,
+        "nb_games": 10
     },
     {
         "name": "Enzo",
         "type": "player",
         "elo": 600,
-        "games": []
+        "nb_games": 0
     },
     {
         "name": "Matt",
         "type": "player",
         "elo": 600,
-        "games": []
+        "nb_games": 0
     },
     {
         "name": "Luis",
         "type": "player",
         "elo": 600,
-        "games": []
-    },
-    {
-        "model": "Random AI",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "Greedy AI",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "Stockfish AI",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "GreedyExploration AI",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "MCTS AI",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "Score CNN",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "Tree Search CNN",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "Q-Learning AI",
-        "type": "AI",
-        "elo": 600,
-        "games": []
-    },
-    {
-        "model": "TD Learning AI",
-        "type": "AI",
-        "elo": 600,
-        "games": []
+        "nb_games": 0
     },
     {
         "model": "Score CNN2",
         "type": "AI",
         "elo": 600,
-        "games": []
+        "nb_games": 0
+    },
+    {
+        "model": "TD Learning AI",
+        "type": "AI",
+        "elo": 600,
+        "nb_games": 0
+    },
+    {
+        "model": "Transformer AI",
+        "type": "AI",
+        "elo": 600,
+        "nb_games": 0
+    },
+    {
+        "model": "Alpha-Beta Transformer",
+        "type": "AI",
+        "elo": 600,
+        "nb_games": 0
+    },
+    {
+        "model": "Tree Search Transformer",
+        "type": "AI",
+        "elo": 600,
+        "nb_games": 0
+    },
+    {
+        "model": "Score CNN",
+        "type": "AI",
+        "elo": 597,
+        "nb_games": 10
+    },
+    {
+        "model": "GreedyExploration AI",
+        "type": "AI",
+        "elo": 588,
+        "nb_games": 10
+    },
+    {
+        "model": "MCTS AI",
+        "type": "AI",
+        "elo": 588,
+        "nb_games": 8
+    },
+    {
+        "model": "Q-Learning AI",
+        "type": "AI",
+        "elo": 580,
+        "nb_games": 11
+    },
+    {
+        "model": "Stockfish AI",
+        "type": "AI",
+        "elo": 562,
+        "nb_games": 10
     }
 ]
