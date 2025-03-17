@@ -80,6 +80,8 @@ class AlphaBetaTransformerEngine(DeepEngine):
         # For each legal move, evaluate the position after that move
         for move in board.legal_moves:
             board.push(move)
+            # USE TRANSFORMER FOR CHOOSING THE MOVE
+            #TAKE THE transformer functions for making this work
             value = self.alphabeta(board, self.max_depth - 1, -float('inf'), float('inf'), board.turn == chess.BLACK)
             board.pop()
 
