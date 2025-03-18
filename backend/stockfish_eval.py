@@ -1,60 +1,15 @@
-import sys
-import platform
-import os
-
-# Check NumPy version compatibility before importing other libraries
-try:
-    import numpy as np
-    numpy_version = np.__version__
-    major_version = int(numpy_version.split('.')[0])
-    
-    if major_version >= 2:
-        print(f"WARNING: You're using NumPy {numpy_version}, which may cause compatibility issues with pandas")
-        print("This script requires libraries compiled with NumPy 1.x or properly compiled for NumPy 2.x")
-        print("\nTo fix this issue, you have two options:")
-        print("1. Downgrade NumPy: pip install numpy==1.24.3")
-        print("2. Upgrade pandas to a version compatible with NumPy 2.x: pip install --upgrade pandas")
-        print("\nOption 1 is more reliable for this codebase.")
-        
-        # Ask user if they want to continue anyway
-        response = input("\nDo you want to continue anyway? (y/n): ")
-        if response.lower() != 'y':
-            print("Exiting. Please fix the NumPy/pandas version compatibility and try again.")
-            sys.exit(1)
-except ImportError:
-    pass
-
 import chess
 import chess.engine
 import json
 import tqdm
 import asyncio
 import torch
-try:
-    import numpy as np
-except ImportError as e:
-    print(f"Error importing NumPy: {e}")
-    print("Please install NumPy 1.x: pip install numpy==1.24.3")
-    sys.exit(1)
+import os
+import numpy as np
+import platform
 
-# Test if we can import pandas (this will fail if NumPy 2.x compatibility issues exist)
-try:
-    import pandas as pd
-except ImportError as e:
-    print(f"Error importing pandas: {e}")
-    print("\nThis is likely due to NumPy 2.x compatibility issues. To fix:")
-    print("1. Downgrade NumPy: pip install numpy==1.24.3")
-    print("2. Upgrade pandas to a version compatible with NumPy 2.x")
-    sys.exit(1)
-
-try:
-    from src.chess.game import Game
-    from meta import AVAILABLE_MODELS
-except ImportError as e:
-    print(f"Error importing project modules: {e}")
-    print("This may be due to NumPy/pandas compatibility issues or missing modules.")
-    print("Try downgrading NumPy: pip install numpy==1.24.3")
-    sys.exit(1)
+from src.chess.game import Game
+from meta import AVAILABLE_MODELS
 
 # Initialize the Stockfish engine with platform-specific path
 def get_engine_path():
@@ -65,27 +20,8 @@ def get_engine_path():
     else:  # Linux
         return "stockfish"  # Assumes it's in PATH
 
-# Try to find Stockfish
 engine_path = get_engine_path()
-if not os.path.exists(engine_path) and platform.system() == "Darwin":
-    # Try alternative locations on macOS
-    alt_paths = [
-        "/usr/local/bin/stockfish",
-        os.path.expanduser("~/opt/homebrew/bin/stockfish"),
-        os.path.expanduser("~/homebrew/bin/stockfish")
-    ]
-    for path in alt_paths:
-        if os.path.exists(path):
-            engine_path = path
-            break
-
-# Check if Stockfish is available
-try:
-    engine = chess.engine.SimpleEngine.popen_uci(engine_path)
-except FileNotFoundError:
-    print(f"Stockfish engine not found at {engine_path}")
-    print("Please install Stockfish and ensure it's in your PATH, or update the engine_path in this script.")
-    sys.exit(1)
+engine = chess.engine.SimpleEngine.popen_uci(engine_path)
 
 # Engine analysis parameters
 ANALYSIS_DEPTH = 8  # Lower depth for quicker analysis
