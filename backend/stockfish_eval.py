@@ -75,11 +75,8 @@ def classify_move_quality(cp_loss):
     return 'blunder'
 
 def evaluate_game(ai_white_name, ai_black_name):
-    """
-    Play a game between ai_white and ai_black, using Stockfish to evaluate each move.
-    Returns a dictionary with comprehensive performance metrics for both AIs.
-    Game will terminate after MOVE_LIMIT moves if no conclusion is reached.
-    """
+    print(f"Starting game: {ai_white_name} (white) vs {ai_black_name} (black)")
+    
     ai_white = AVAILABLE_MODELS[ai_white_name]()
     ai_black = AVAILABLE_MODELS[ai_black_name]()
 
@@ -250,6 +247,7 @@ def evaluate_game(ai_white_name, ai_black_name):
             m['decisive_move_percentage'] = (m['decisive_moves'] / moves) * 100
 
     metrics['total_moves'] = total_moves
+    print(f"Completed game: {ai_white_name} vs {ai_black_name}. Result: {metrics['winner']} ({metrics['outcome_reason']})")
     return metrics
 
 # Example usage: simulate multiple games and aggregate performance
@@ -258,6 +256,18 @@ ais = ["Random AI", "Sunfish AI", "Greedy AI", "Transformer AI", "Tree Search Tr
 
 # Number of games each AI plays against each other
 N = 5  # Reduced number of games for faster execution
+
+# Before the tournament
+for ai_name in ais:
+    if ai_name not in AVAILABLE_MODELS:
+        print(f"Warning: {ai_name} not found in AVAILABLE_MODELS")
+    else:
+        try:
+            model = AVAILABLE_MODELS[ai_name]()
+            model.setup()
+            print(f"{ai_name} loaded successfully")
+        except Exception as e:
+            print(f"Error loading {ai_name}: {e}")
 
 # Results dictionary to accumulate metrics
 results = {ai: {
@@ -282,95 +292,99 @@ for ai_white in ais:
             continue
         
         for _ in range(N):
-            metrics = evaluate_game(ai_white, ai_black)
-            
-            # Record game result
-            game_result = {
-                "white": ai_white,
-                "black": ai_black,
-                "winner": metrics['winner'],
-                "outcome_reason": metrics['outcome_reason'],
-                "metrics": metrics
-            }
-            
-            save_evaluation_results(game_result)
-            
-            # Update AI stats with win/loss/draw
-            if metrics['winner'] == 'white':
-                results[ai_white]['games_won'] += 1
-                results[ai_black]['games_lost'] += 1
-            elif metrics['winner'] == 'black':
-                results[ai_white]['games_lost'] += 1
-                results[ai_black]['games_won'] += 1
-            else:  # draw
-                results[ai_white]['games_drawn'] += 1
-                results[ai_black]['games_drawn'] += 1
-            
-            # Update white's metrics
-            results[ai_white]['games_played'] += 1
-            results[ai_white]['total_moves'] += metrics['white']['moves_count']
-            results[ai_white]['total_acpl'] += metrics['white']['acpl'] * metrics['white']['moves_count'] if metrics['white']['moves_count'] > 0 else 0
-            
-            for quality in MOVE_QUALITY_THRESHOLDS.keys():
-                results[ai_white]['move_qualities'][quality] += metrics['white']['move_qualities'][quality]
-            
-            results[ai_white]['mate_sequences']['found'] += metrics['white']['mate_sequences_found']
-            results[ai_white]['mate_sequences']['missed'] += metrics['white']['mate_sequences_missed']
-            
-            if 'position_volatility' in metrics['white']:
-                results[ai_white]['position_volatility'].append(metrics['white']['position_volatility'])
-            
-            results[ai_white]['decisive_moves'] += metrics['white']['decisive_moves']
-            
-            # Update phase performance for white
-            for phase in ['opening', 'middlegame', 'endgame']:
-                if isinstance(metrics['white']['phase_performance'][phase], list):
-                    phase_moves = len(metrics['white']['phase_performance'][phase])
-                    if phase_moves > 0:
-                        avg_phase_loss = sum(metrics['white']['phase_performance'][phase]) / phase_moves
-                        results[ai_white]['phase_performance'][phase] += avg_phase_loss * phase_moves
-                        results[ai_white]['phase_moves'][phase] += phase_moves
-                else:
-                    # If already averaged in evaluate_game
-                    if isinstance(metrics['white']['phase_performance'][phase], (int, float, np.number)) and metrics['white']['phase_performance'][phase] > 0:
-                        # We already have the average, but need to know how many moves
-                        # Estimate the number of moves based on the total moves in this phase
-                        estimated_phase_moves = metrics['white']['moves_count'] // 3  # Rough estimate
-                        results[ai_white]['phase_performance'][phase] += metrics['white']['phase_performance'][phase] * estimated_phase_moves
-                        results[ai_white]['phase_moves'][phase] += estimated_phase_moves
-            
-            # Update black's metrics similarly
-            results[ai_black]['games_played'] += 1
-            results[ai_black]['total_moves'] += metrics['black']['moves_count']
-            results[ai_black]['total_acpl'] += metrics['black']['acpl'] * metrics['black']['moves_count'] if metrics['black']['moves_count'] > 0 else 0
-            
-            for quality in MOVE_QUALITY_THRESHOLDS.keys():
-                results[ai_black]['move_qualities'][quality] += metrics['black']['move_qualities'][quality]
-            
-            results[ai_black]['mate_sequences']['found'] += metrics['black']['mate_sequences_found']
-            results[ai_black]['mate_sequences']['missed'] += metrics['black']['mate_sequences_missed']
-            
-            if 'position_volatility' in metrics['black']:
-                results[ai_black]['position_volatility'].append(metrics['black']['position_volatility'])
-            
-            results[ai_black]['decisive_moves'] += metrics['black']['decisive_moves']
-            
-            # Update phase performance for black
-            for phase in ['opening', 'middlegame', 'endgame']:
-                if isinstance(metrics['black']['phase_performance'][phase], list):
-                    phase_moves = len(metrics['black']['phase_performance'][phase])
-                    if phase_moves > 0:
-                        avg_phase_loss = sum(metrics['black']['phase_performance'][phase]) / phase_moves
-                        results[ai_black]['phase_performance'][phase] += avg_phase_loss * phase_moves
-                        results[ai_black]['phase_moves'][phase] += phase_moves
-                else:
-                    # If already averaged in evaluate_game
-                    if isinstance(metrics['black']['phase_performance'][phase], (int, float, np.number)) and metrics['black']['phase_performance'][phase] > 0:
-                        # We already have the average, but need to know how many moves
-                        # Estimate the number of moves based on the total moves in this phase
-                        estimated_phase_moves = metrics['black']['moves_count'] // 3  # Rough estimate
-                        results[ai_black]['phase_performance'][phase] += metrics['black']['phase_performance'][phase] * estimated_phase_moves
-                        results[ai_black]['phase_moves'][phase] += estimated_phase_moves
+            try:
+                metrics = evaluate_game(ai_white, ai_black)
+                
+                # Record game result
+                game_result = {
+                    "white": ai_white,
+                    "black": ai_black,
+                    "winner": metrics['winner'],
+                    "outcome_reason": metrics['outcome_reason'],
+                    "metrics": metrics
+                }
+                
+                save_evaluation_results(game_result)
+                
+                # Update AI stats with win/loss/draw
+                if metrics['winner'] == 'white':
+                    results[ai_white]['games_won'] += 1
+                    results[ai_black]['games_lost'] += 1
+                elif metrics['winner'] == 'black':
+                    results[ai_white]['games_lost'] += 1
+                    results[ai_black]['games_won'] += 1
+                else:  # draw
+                    results[ai_white]['games_drawn'] += 1
+                    results[ai_black]['games_drawn'] += 1
+                
+                # Update white's metrics
+                results[ai_white]['games_played'] += 1
+                results[ai_white]['total_moves'] += metrics['white']['moves_count']
+                results[ai_white]['total_acpl'] += metrics['white']['acpl'] * metrics['white']['moves_count'] if metrics['white']['moves_count'] > 0 else 0
+                
+                for quality in MOVE_QUALITY_THRESHOLDS.keys():
+                    results[ai_white]['move_qualities'][quality] += metrics['white']['move_qualities'][quality]
+                
+                results[ai_white]['mate_sequences']['found'] += metrics['white']['mate_sequences_found']
+                results[ai_white]['mate_sequences']['missed'] += metrics['white']['mate_sequences_missed']
+                
+                if 'position_volatility' in metrics['white']:
+                    results[ai_white]['position_volatility'].append(metrics['white']['position_volatility'])
+                
+                results[ai_white]['decisive_moves'] += metrics['white']['decisive_moves']
+                
+                # Update phase performance for white
+                for phase in ['opening', 'middlegame', 'endgame']:
+                    if isinstance(metrics['white']['phase_performance'][phase], list):
+                        phase_moves = len(metrics['white']['phase_performance'][phase])
+                        if phase_moves > 0:
+                            avg_phase_loss = sum(metrics['white']['phase_performance'][phase]) / phase_moves
+                            results[ai_white]['phase_performance'][phase] += avg_phase_loss * phase_moves
+                            results[ai_white]['phase_moves'][phase] += phase_moves
+                    else:
+                        # If already averaged in evaluate_game
+                        if isinstance(metrics['white']['phase_performance'][phase], (int, float, np.number)) and metrics['white']['phase_performance'][phase] > 0:
+                            # We already have the average, but need to know how many moves
+                            # Estimate the number of moves based on the total moves in this phase
+                            estimated_phase_moves = metrics['white']['moves_count'] // 3  # Rough estimate
+                            results[ai_white]['phase_performance'][phase] += metrics['white']['phase_performance'][phase] * estimated_phase_moves
+                            results[ai_white]['phase_moves'][phase] += estimated_phase_moves
+                
+                # Update black's metrics similarly
+                results[ai_black]['games_played'] += 1
+                results[ai_black]['total_moves'] += metrics['black']['moves_count']
+                results[ai_black]['total_acpl'] += metrics['black']['acpl'] * metrics['black']['moves_count'] if metrics['black']['moves_count'] > 0 else 0
+                
+                for quality in MOVE_QUALITY_THRESHOLDS.keys():
+                    results[ai_black]['move_qualities'][quality] += metrics['black']['move_qualities'][quality]
+                
+                results[ai_black]['mate_sequences']['found'] += metrics['black']['mate_sequences_found']
+                results[ai_black]['mate_sequences']['missed'] += metrics['black']['mate_sequences_missed']
+                
+                if 'position_volatility' in metrics['black']:
+                    results[ai_black]['position_volatility'].append(metrics['black']['position_volatility'])
+                
+                results[ai_black]['decisive_moves'] += metrics['black']['decisive_moves']
+                
+                # Update phase performance for black
+                for phase in ['opening', 'middlegame', 'endgame']:
+                    if isinstance(metrics['black']['phase_performance'][phase], list):
+                        phase_moves = len(metrics['black']['phase_performance'][phase])
+                        if phase_moves > 0:
+                            avg_phase_loss = sum(metrics['black']['phase_performance'][phase]) / phase_moves
+                            results[ai_black]['phase_performance'][phase] += avg_phase_loss * phase_moves
+                            results[ai_black]['phase_moves'][phase] += phase_moves
+                    else:
+                        # If already averaged in evaluate_game
+                        if isinstance(metrics['black']['phase_performance'][phase], (int, float, np.number)) and metrics['black']['phase_performance'][phase] > 0:
+                            # We already have the average, but need to know how many moves
+                            # Estimate the number of moves based on the total moves in this phase
+                            estimated_phase_moves = metrics['black']['moves_count'] // 3  # Rough estimate
+                            results[ai_black]['phase_performance'][phase] += metrics['black']['phase_performance'][phase] * estimated_phase_moves
+                            results[ai_black]['phase_moves'][phase] += estimated_phase_moves
+            except Exception as e:
+                print(f"Error in game between {ai_white} and {ai_black}: {e}")
+                continue
 
 # Calculate final averages for phase performance
 for ai in ais:
@@ -410,6 +424,27 @@ for ai in ais:
         print(f"Decisive Moves per Game: {r['decisive_moves'] / r['games_played']:.2f}")
     else:
         print(f"\n{ai}: No games played.")
+
+# After the tournament
+print("\nGames played by each AI pair:")
+game_pairs = {}
+for ai_white in ais:
+    for ai_black in ais:
+        if ai_white != ai_black:
+            key = f"{ai_white} vs {ai_black}"
+            game_pairs[key] = 0
+
+# Count games from results file
+with open(stockfish_eval_path, "r") as f:
+    all_games = json.load(f)
+    for game in all_games:
+        key = f"{game['white']} vs {game['black']}"
+        if key in game_pairs:
+            game_pairs[key] += 1
+
+# Print the counts
+for pair, count in game_pairs.items():
+    print(f"{pair}: {count} games")
 
 # Close the engine after analysis is done
 engine.close()
