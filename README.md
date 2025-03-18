@@ -19,6 +19,9 @@
 - You can find basic communication method in `index.html` such as `send_message` and `wait_for_message`.
 - We are using d3.js to render the chess board.
 
+### Report
+- You can find our final report at `report/report.pdf`.
+
 ## Getting Started
 
 ### Prerequisites
