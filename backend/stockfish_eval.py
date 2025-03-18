@@ -332,10 +332,12 @@ for ai_white in ais:
                         results[ai_white]['phase_moves'][phase] += phase_moves
                 else:
                     # If already averaged in evaluate_game
-                    if metrics['white']['phase_performance'][phase] > 0:
-                        phase_moves = len([m for m in metrics['white']['phase_performance'][phase] if m > 0])
-                        results[ai_white]['phase_performance'][phase] += metrics['white']['phase_performance'][phase]
-                        results[ai_white]['phase_moves'][phase] += phase_moves
+                    if isinstance(metrics['white']['phase_performance'][phase], (int, float, np.number)) and metrics['white']['phase_performance'][phase] > 0:
+                        # We already have the average, but need to know how many moves
+                        # Estimate the number of moves based on the total moves in this phase
+                        estimated_phase_moves = metrics['white']['moves_count'] // 3  # Rough estimate
+                        results[ai_white]['phase_performance'][phase] += metrics['white']['phase_performance'][phase] * estimated_phase_moves
+                        results[ai_white]['phase_moves'][phase] += estimated_phase_moves
             
             # Update black's metrics similarly
             results[ai_black]['games_played'] += 1
@@ -363,10 +365,12 @@ for ai_white in ais:
                         results[ai_black]['phase_moves'][phase] += phase_moves
                 else:
                     # If already averaged in evaluate_game
-                    if metrics['black']['phase_performance'][phase] > 0:
-                        phase_moves = len([m for m in metrics['black']['phase_performance'][phase] if m > 0])
-                        results[ai_black]['phase_performance'][phase] += metrics['black']['phase_performance'][phase]
-                        results[ai_black]['phase_moves'][phase] += phase_moves
+                    if isinstance(metrics['black']['phase_performance'][phase], (int, float, np.number)) and metrics['black']['phase_performance'][phase] > 0:
+                        # We already have the average, but need to know how many moves
+                        # Estimate the number of moves based on the total moves in this phase
+                        estimated_phase_moves = metrics['black']['moves_count'] // 3  # Rough estimate
+                        results[ai_black]['phase_performance'][phase] += metrics['black']['phase_performance'][phase] * estimated_phase_moves
+                        results[ai_black]['phase_moves'][phase] += estimated_phase_moves
 
 # Calculate final averages for phase performance
 for ai in ais:
