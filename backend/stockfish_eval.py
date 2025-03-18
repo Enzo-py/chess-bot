@@ -255,7 +255,7 @@ ais = ["Random AI", "Sunfish AI", "Greedy AI", "Transformer AI", "Tree Search Tr
        "Score CNN", "GreedyExploration AI", "MCTS AI", "Q-Learning AI", "Stockfish AI"]
 
 # Number of games each AI plays against each other
-N = 5  # Reduced number of games for faster execution
+N = 1  # Reduced number of games for faster execution
 
 # Before the tournament
 for ai_name in ais:
