@@ -72,6 +72,12 @@
         "nb_games": 0
     },
     {
+        "model": "Transformer Alpha-Beta Enhanced",
+        "type": "AI",
+        "elo": 600,
+        "nb_games": 0
+    },
+    {
         "model": "Score CNN",
         "type": "AI",
         "elo": 597,

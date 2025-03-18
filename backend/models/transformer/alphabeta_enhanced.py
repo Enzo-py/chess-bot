@@ -2,12 +2,14 @@ import chess
 import time
 import numpy as np
 import random
-from models.engine import Engine
+from models.deep_engine import DeepEngine
 from models.greedy.greedy_ai import GreedyAI
 from models.greedy.greedy_exploration import GreedyExplorationAI
 from collections import OrderedDict
+from models.transformer.transformer import GenerativeHead, Decoder, ChessTransformerEncoder, BoardEvaluator
 
-class ScratchFishAI(Engine):
+
+class TransformerAlphaBetaEnhanced(DeepEngine):
     """
     Enhanced Stockfish-inspired chess AI with advanced search techniques.
     
@@ -23,7 +25,8 @@ class ScratchFishAI(Engine):
     
     __author__ = "Shashwat SHARMA"
     __description__ = "Stockfish-inspired chess AI again which has alpha-beta pruning"
-    
+    __weights__ = 'TransformerScore'
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.time_limit = 0.9  # Maximum time in seconds (we want to play chess fast)
@@ -66,13 +69,21 @@ class ScratchFishAI(Engine):
         # Opening book
         self.opening_book = self.initialize_opening_book()
 
+        self.set(head_name="board_evaluation", head=BoardEvaluator())
+        self.set(head_name="generative", head=GenerativeHead())
+        self.set(head_name="encoder", head=ChessTransformerEncoder())
+        self.set(head_name="decoder", head=Decoder())
+        self.confidence = 0.5
+
     def evaluate(self, game):
-        board = game.board
-        prob = self.evaluate_position(board)
+        self.setup()
+        self.game = game
+        self.color = game.board.turn
+        prob = self.evaluate_position(game.board)
         if self.color == chess.BLACK:
             return prob, 1 - prob
         return 1 - prob, prob
-        
+
         
     def initialize_opening_book(self):
         """Initialize a simple opening book with common opening moves"""
@@ -292,9 +303,11 @@ class ScratchFishAI(Engine):
         score += self.evaluate_knight_outposts(board)
         
         # Return score normalized to centipawns (1 pawn = 100 centipawns)
-        # do sigmoid on score
+        
+        ai_score = self.predict(head='board_evaluation')[int(self.color)]
+        # normalise score using sigmoid function
         score = 1 / (1 + np.exp(-score))
-
+        score = score * self.confidence + ai_score * (1 - self.confidence)
         return score
     
     def evaluate_pawn_structure(self, board):

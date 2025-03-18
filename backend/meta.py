@@ -13,6 +13,7 @@ from models.cnn2.cnn_score2 import CNNScore2
 from models.transformer.transformer import TransformerScore
 from models.transformer.alpha_beta import AlphaBetaTransformerEngine
 from models.transformer.tree_search import TreeSearchTransformer
+from models.transformer.alphabeta_enhanced import TransformerAlphaBetaEnhanced
 
 AVAILABLE_MODELS = {
     "Random AI": RandomAI,
@@ -29,6 +30,7 @@ AVAILABLE_MODELS = {
     "TD Learning AI": TDLearningAI,
     "Transformer AI": TransformerScore,
     "Alpha-Beta Transformer": AlphaBetaTransformerEngine,
+    "Transformer Alpha-Beta Enhanced": TransformerAlphaBetaEnhanced,
     "Tree Search Transformer": TreeSearchTransformer,
 }
 """
