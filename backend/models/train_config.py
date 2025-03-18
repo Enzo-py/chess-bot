@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from src.utils.console import Style
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 __all__ = ["TrainConfig", "TrainConfigBase", "AllHeads", "GenerativeHead", "BoardEvaluationHead", "EncoderHead", "WithPrints", "AutoSave"]
 
@@ -64,7 +66,7 @@ class TrainConfig:
         """Applique une configuration."""
         return value.apply(self.engine)
 
-    def train(self, epochs=10, batch_size=16, **data):
+    def train(self, epochs=10, batch_size=16, loader=None):
         """
             Train the model.
             You need to provide the games and the labels OR a loader.
@@ -80,26 +82,19 @@ class TrainConfig:
             line = ">> Start training for " + str(epochs) + " epochs"
             print(f"| {line: <{self.line_length-2}} |")
 
-        games = data.get("games")
-        labels = data.get("moves") or data.get("best_moves") or data.get("win_probs")
-        loader = data.get("loader")
+        if loader is None: raise Exception("No data loader ?")
 
-        if loader is None:
-            assert games is not None, "You need to provide games to train on."
-            assert labels is not None, "You need to provide labels (best moves or win probabilities) to train on."
-            assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
-        
-        self.engine.module.train()
+        self.engine._get_validation_set(loader, batch_size * 6)
         if self.engine._train_config["head"] == "all":
             raise NotImplementedError("Training all heads is not implemented yet.")
         elif self.engine._train_config["head"] == "generative":
-            return self.engine._train_on_generation(epochs, batch_size, games, labels, loader=loader)
+            return self.engine._train_on_generation(epochs, batch_size, loader=loader)
         
         elif self.engine._train_config["head"] == "board_evaluation":
-            return self.engine._train_board_evaluation(epochs, batch_size, games, labels, loader=loader)
+            return self.engine._train_board_evaluation(epochs, batch_size, loader=loader)
         
         elif self.engine._train_config["head"] == "encoder":
-            return self.engine._train_encoder(epochs, batch_size, games, loader=loader)
+            return self.engine._train_encoder(epochs, batch_size, loader=loader)
         
         else:
             raise ValueError(f"Invalid head: {self.engine._train_config['head']}")
@@ -138,6 +133,51 @@ class TrainConfig:
             return self.engine._test_encoder(games, loader=loader)
         else:
             raise ValueError(f"Invalid head: {self.engine._train_config['head']}")
+        
+    def plot(self, data, title=None):
+        if len(data) < 5:
+            raise Exception("Invalid data, should come from env.train")
+        train_loss, val_loss, train_acc, val_acc = data[0], data[1], data[2], data[3]
+        if title is None:
+            title = data[-1]
+
+        epochs = range(1, len(train_loss) + 1)
+        
+        # Set a beautiful seaborn style
+        sns.set_theme(style="whitegrid")
+        
+        # Create subplots: one for loss and one for accuracy
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Plot loss curves on the first axis
+        sns.lineplot(x=epochs, y=train_loss, ax=ax1, label="Train Loss",
+                    color="blue", marker="o")
+        sns.lineplot(x=epochs, y=val_loss, ax=ax1, label="Val Loss",
+                    color="orange", marker="o")
+        ax1.set_xlabel("Epochs", fontsize=12)
+        ax1.set_ylabel("Loss", fontsize=12)
+        ax1.set_title("Loss over Epochs", fontsize=14)
+        
+        # Plot accuracy curves on the second axis
+        sns.lineplot(x=epochs, y=train_acc, ax=ax2, label="Train Acc",
+                    color="blue", marker="o")
+        sns.lineplot(x=epochs, y=val_acc, ax=ax2, label="Val Acc",
+                    color="orange", marker="o")
+        ax2.set_xlabel("Epochs", fontsize=12)
+        ax2.set_ylabel("Accuracy", fontsize=12)
+        ax2.set_title("Accuracy over Epochs", fontsize=14)
+        
+        # Set an overall title
+        fig.suptitle(title, fontsize=16)
+        
+        # Adjust legends
+        ax1.legend(loc="upper right", fontsize=10)
+        ax2.legend(loc="upper right", fontsize=10)
+        
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.show()
+
+
 
     def set_load_policy(self, policy):
         """

@@ -96,6 +96,8 @@ class DeepEngine(Engine):
         self.module = DeepEngineModule()
         """torch.nn.Module: The model used to score the games."""
 
+        self.validation_set = None
+
         self.is_setup = False
     
         self.auto_save_version = None
@@ -133,7 +135,7 @@ class DeepEngine(Engine):
             },
             "settings": {}
         }
-    
+
     def evaluate(self, game: Game) -> float:
         """
         Evaluate the game: return the win probability of the game (black wr, white, wr).
@@ -252,6 +254,12 @@ class DeepEngine(Engine):
         elif element == "classifier":
             torch.save(self.module.classifier.state_dict(), path)
 
+    def _get_validation_set(self, loader: Loader, size: int = 128):
+        initial_window = loader.window
+        loader.window = size
+        self.validation_set = self._exctract_data(loader, 0, "test")
+        loader.window = initial_window
+
     def _exctract_data(self, loader: Loader, epoch: int, _for="train") -> tuple:
 
         assert _for in ["train", "test"], "Invalid value for '_for'. Must be 'train' or 'test'."
@@ -284,7 +292,10 @@ class DeepEngine(Engine):
                 else:
                     d = d.copy()
                     for _ in range(random.randint(1, len(d.history) - 2)):
-                        d.board.pop()
+                        move = d.board.pop()
+                        if random.random() > 0.5:
+                            games.append(d)
+                            moves.append(move)
                     
                     move = d.board.pop()
                     games.append(d)
@@ -296,15 +307,12 @@ class DeepEngine(Engine):
                 if self._train_config["head"] == "board_evaluation":
                     probs = (0.5, 0.5) if d.game.draw else (1, 0) if d.game.winner == chess.WHITE else (0, 1)
                     for _ in range(len(d.moves) - 1):
-                        if _for == "train":
-                            games.append(d.game)
-                            moves.append(probs)
-                            d.game = d.game.copy()
-                            d.game.move(d.moves[0])
-                            d.moves = d.moves[1:]
-                        else:
-                            games.append(d.game)
-                            moves.append(probs)
+                        games.append(d.game)
+                        moves.append(probs)
+                        d.game = d.game.copy()
+                        d.game.move(d.moves[0])
+                        d.moves = d.moves[1:]
+             
 
                     continue
 
@@ -327,7 +335,7 @@ class DeepEngine(Engine):
             
         return games, moves
 
-    def _train_board_evaluation(self, epochs: int, batch_size, games: list[Game], win_probs: list[tuple[float, float]], loader: Loader = None):
+    def _train_board_evaluation(self, epochs: int, batch_size, loader: Loader):
         """
         Train the model on the board evaluation head: predict the win probability.
         [black_win, white_win]
@@ -338,12 +346,6 @@ class DeepEngine(Engine):
         :param batch_size: size of the batch
         :type batch_size: int
 
-        :param games: list of games
-        :type games: list[Game]
-
-        :param win_probs: list of tuples (black_win_prob, white_win_prob)
-        :type win_probs: list[tuple[float, float]]
-
         :param loader: loader to use to get the games
         :type loader: Loader
 
@@ -351,19 +353,20 @@ class DeepEngine(Engine):
         :rtype: tuple[list[float], list[float], list[float], list[float]]
         """
 
-        if loader is None:
-            assert len(games) == len(win_probs) > 0, "You need at least one game to train, and one label per game."
-            assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-            assert isinstance(win_probs[0], tuple), "'win_probs' should be a list of tuples."
+        if self.validation_set is None: raise Exception("Undefined validation set")
 
-        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0005)
-
-        num_samples = len(games or [])
-        num_batches = (num_samples + batch_size - 1) // batch_size  # Ensure full coverage
+        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0001)
 
         all_total_loss = []
+        all_acc = []
+        all_validation_acc = []
+        all_validation_loss = []
         all_contrastive_loss = []
         all_classification_loss = []
+
+        num_validation_samples = len(self.validation_set)
+        num_validation_batches = (num_validation_samples + batch_size - 1) // batch_size
+        validation_game, validation_probs = self.validation_set
 
         for epoch in range(epochs):
             total_loss = 0
@@ -378,25 +381,39 @@ class DeepEngine(Engine):
 
             indices = torch.randperm(num_samples)
 
+            self.module.train()
+            correct, total = 0, 0
             for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
                 
                 batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
                 batch_games = [games[i] for i in batch_indices]
-                batch_win_probs = torch.tensor([win_probs[i] for i in batch_indices], dtype=torch.float32, device=self.module.device)
+                batch_win_probs = torch.tensor(
+                    [win_probs[i] for i in batch_indices], # [proba_black, proba_white]
+                    dtype=torch.float32,
+                    device=self.module.device
+                )
 
                 batch_games_t = [game.reverse() for game in batch_games]
 
                 # Predict the probabilities
-                probs, embeddings = self.module(batch_games, head="board_evaluation")
+                probs, embeddings = self.module(batch_games, head="board_evaluation") # already softmaxed
                 probs_t, embeddings_t = self.module(batch_games_t, head="board_evaluation")
+                probs_t = torch.flip(probs_t, [1])
 
-                # Compute classification loss (Binary Cross Entropy)
-                classification_loss = F.binary_cross_entropy(probs, batch_win_probs)
+                pred_probs = probs[:, 1]  # Shape: (batch_size,)
+                pred_probs_t = probs_t[:, 1]  # Shape: (batch_size,)
+                target_probs = batch_win_probs[:, 1]  # Shape: (batch_size,)
 
-                # Compute contrastive loss (make embeddings for original and flipped boards similar)
+                # Count correct predictions
+                correct += torch.sum(1 - torch.abs(pred_probs - target_probs)).item()
+                correct += torch.sum(1 - torch.abs(pred_probs_t - target_probs)).item()
+                total += 2 * batch_size
+
+                # Compute classification loss
+                classification_loss = F.mse_loss(probs, batch_win_probs)
+
+                # Compute contrastive on provs
                 contrastive_loss = self._contrastive_loss(probs, probs_t)
-
-                # Total loss
                 loss = classification_loss + 0.15 * contrastive_loss
 
                 # Backpropagation
@@ -411,6 +428,44 @@ class DeepEngine(Engine):
             all_total_loss.append(total_loss / num_batches)
             all_contrastive_loss.append(contrastive_loss_total / num_batches)
             all_classification_loss.append(classification_loss_total / num_batches)
+            all_acc.append(correct / total)
+
+            self.module.eval()
+            total_val_loss = 0
+            correct, total = 0, 0
+
+            indices = torch.randperm(num_validation_samples)
+            for batch_idx in range(num_validation_batches):
+                batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
+                batch_games = [validation_game[i] for i in batch_indices]
+                batch_win_probs = torch.tensor([validation_probs[i] for i in batch_indices], dtype=torch.float32, device=self.module.device)
+
+                batch_games_t = [game.reverse() for game in batch_games]
+
+                with torch.no_grad():
+                    probs, embeddings = self.module(batch_games, head="board_evaluation")
+                    probs_t, embeddings_t = self.module(batch_games_t, head="board_evaluation")
+                probs_t = torch.flip(probs_t, [1])
+
+                pred_probs = probs[:, 1]  # Shape: (batch_size,)
+                pred_probs_t = probs_t[:, 1]  # Shape: (batch_size,)
+                target_probs = batch_win_probs[:, 1]  # Shape: (batch_size,)
+
+                # Count correct predictions
+                correct += torch.sum(1 - torch.abs(pred_probs - target_probs)).item()
+                correct += torch.sum(1 - torch.abs(pred_probs_t - target_probs)).item()
+                total += 2 * batch_size
+
+                # Compute classification loss (Binary Cross Entropy)
+                classification_loss = F.mse_loss(probs, batch_win_probs)
+                # Compute contrastive loss (make embeddings for original and flipped boards similar)
+                contrastive_loss = self._contrastive_loss(probs, probs_t)
+
+                loss = classification_loss + 0.15 * contrastive_loss
+                total_val_loss += loss.item()
+                
+            all_validation_loss.append(total_val_loss / num_validation_batches)
+            all_validation_acc.append(correct / total)
 
             if self._train_config["UI"] == 'prints':
                 l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Contrastive Loss: {contrastive_loss_total / num_batches:.2f}, " 
@@ -422,19 +477,24 @@ class DeepEngine(Engine):
                 print(f"| {'': <{TrainConfig.line_length-2}} |")
 
             if self._train_config["auto_save"]:
+                path = "backend/models/saves/"
+                if not os.path.exists(path) and os.path.exists("models/saves/"):
+                    path = "models/saves/"
+                elif not os.path.exists(path): raise Exception("Cannot find backend/models/saves")
+                
                 if self.auto_save_version is None:
-                    files = [f for f in os.listdir("backend/models/saves") if self.__class__.__name__ in f and "auto-save" in f]
+                    files = [f for f in os.listdir(path) if self.__class__.__name__ in f and "auto-save" in f]
                     self.auto_save_version = len(files)
-                self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
+                self.save(element="all", path=path + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
 
-        return all_total_loss, all_contrastive_loss, all_classification_loss
+        return all_total_loss, all_validation_loss, all_acc, all_validation_acc, all_contrastive_loss, all_classification_loss, "Training board evaluation head"
 
-    def _train_encoder(self, epochs: int, batch_size, games: list[Game], loader: Loader = None):
+    def _train_encoder(self, epochs: int, batch_size, loader: Loader = None):
         """
         Train the model on the encoder head.
         """
 
-        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0005)
+        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0001)
 
         num_samples = len(games or [])
         num_batches = (num_samples + batch_size - 1) // batch_size
@@ -506,19 +566,22 @@ class DeepEngine(Engine):
                 print(f"| {'': <{TrainConfig.line_length-2}} |")
 
             if self._train_config["auto_save"]:
+                path = "backend/models/saves/"
+                if not os.path.exists(path) and os.path.exists("models/saves/"):
+                    path = "models/saves/"
+                elif not os.path.exists(path): raise Exception("Cannot find backend/models/saves")
+                
                 if self.auto_save_version is None:
-                    files = [f for f in os.listdir("backend/models/saves") if self.__class__.__name__ in f and "auto-save" in f]
+                    files = [f for f in os.listdir(path) if self.__class__.__name__ in f and "auto-save" in f]
                     self.auto_save_version = len(files)
-                self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
+                self.save(element="all", path=path + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
 
         return all_total_loss
         
-    def _train_on_generation(self, epochs: int, batch_size, games: list[Game], labels: Union[list[float], list[chess.Move]], loader: Loader = None):
+    def _train_on_generation(self, epochs: int, batch_size, loader: Loader = None):
         
-        if loader is None:
-            assert len(games) == len(labels) > 0, "You need at least one game to train, and one label per game."
-            assert isinstance(games[0], Game), "'games' should be a list of instances of <Game>."
-            assert isinstance(labels[0], chess.Move), "'labels' should be a list of integers or instances of <chess.Move>."
+        if loader is None: raise Exception("Undefined loader")
+        if self.validation_set is None: raise Exception("Undefined validation set")
 
         assert batch_size > 1, "Batch size must be greater than 1."
 
@@ -540,19 +603,26 @@ class DeepEngine(Engine):
                         # most of the time, promotion is not possible but we still considere the move, cuz easier
                         
                         moves_dict[(i, j, k)] = len(moves_dict)
-            torch.save(moves_dict, "backend/data/moves_dict.pth")
+            if os.path.exists("backend/data/"):
+                torch.save(moves_dict, "backend/data/moves_dict.pth")
+            elif os.path.exists(".data/"):
+                torch.save(moves_dict, "./data/moves_dict.pth")
 
-        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0005)
+        optimizer = torch.optim.Adam(self.module.parameters(), lr=0.0001)
         criterion = nn.CrossEntropyLoss()
         legal_criterion = nn.BCEWithLogitsLoss()
 
-        num_samples = len(games or [])
-        num_batches = (num_samples + batch_size - 1) // batch_size  # Ensure full coverage
+        num_val_samples = len(self.validation_set)
+        num_val_batches = (num_val_samples + batch_size - 1) // batch_size
+        validation_game, val_best_moves = self.validation_set
 
         all_total_loss = []
         all_legal_loss = []
         all_best_move_loss = []
-        all_contrastive_loss = []
+
+        acc_train = []
+        
+        loss_val, acc_val = [], []
 
         for epoch in range(epochs):
             total_loss, total_best_move_loss, total_legal_loss, total_contrastive_loss = 0, 0, 0, 0
@@ -564,7 +634,7 @@ class DeepEngine(Engine):
                 num_batches = (num_samples + batch_size - 1) // batch_size
 
             indices = torch.randperm(num_samples)
-
+            cumul_acc = 0
             for batch_idx in tqdm.tqdm(range(num_batches), ncols=TrainConfig.line_length+2, desc="| "):
 
                 batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
@@ -596,26 +666,76 @@ class DeepEngine(Engine):
                 num_legal_moves = legal_moves.sum(dim=1, keepdim=True).clamp(min=1)
                 legal_loss = (legal_loss / num_legal_moves).sum() * 0.01 # normalize by the number of legal moves
 
-                # Compute contrastive loss
-                contrastive_weight = 0.1 if epoch > 4 else 0 # warmup
-                # contrastive loss have to be fixed: see train on encoder
-                # contrastive_loss = self._contrastive_loss(embeddings, embeddings_t) * contrastive_weight
-
                 # Backpropagation
                 optimizer.zero_grad()
-                loss = best_move_loss + legal_loss #+ contrastive_loss
+                loss = best_move_loss + legal_loss
                 loss.backward()
                 optimizer.step()
+
+                pred = predictions.argmax(dim=1)
+                acc = (pred == targets).float().mean().item()
+                pred_t = predictions_t.argmax(dim=1)
+                acc_t = (pred_t == targets_t).float().mean().item()
+                cumul_acc += (acc + acc_t) / 2
 
                 total_loss += loss.item()
                 total_legal_loss += legal_loss.item()
                 total_best_move_loss += best_move_loss.item()
-                # total_contrastive_loss += contrastive_loss.item()
+
 
             all_total_loss.append(total_loss / num_batches)
             all_legal_loss.append(total_legal_loss / num_batches)
             all_best_move_loss.append(total_best_move_loss / num_batches)
-            # all_contrastive_loss.append(total_contrastive_loss / num_batches)
+            acc_train.append(cumul_acc / num_batches)
+            
+            self.module.eval()
+            total_val_loss = 0
+            correct = 0
+
+            indices = torch.randperm(num_val_samples)
+            for batch_idx in range(num_val_batches):
+                
+                batch_indices = indices[batch_idx * batch_size : (batch_idx + 1) * batch_size]
+                batch_games = [validation_game[i] for i in batch_indices]
+                batch_best_moves = [val_best_moves[i] for i in batch_indices]
+                batch_games_t = [game.reverse() for game in batch_games]
+                batch_best_moves_t = [Game.reverse_move(move) for move in batch_best_moves]
+
+
+                with torch.no_grad():
+                    predictions, embeddings = self.module(batch_games, head="generation")# [batch_size, 64*64*5]
+                    predictions_t, embeddings_t = self.module(batch_games_t, head="generation")
+            
+                targets = [moves_dict[self.encode_move(move)] for move in batch_best_moves]
+                targets = torch.tensor(targets, dtype=torch.long, device=self.module.device)
+
+                targets_t = [moves_dict[self.encode_move(move)] for move in batch_best_moves_t]
+                targets_t = torch.tensor(targets_t, dtype=torch.long, device=self.module.device)
+
+                # Compute loss: 1 to increase the prob of the best move, 0 for the others
+                best_move_loss = criterion(predictions, targets)
+                best_move_t_loss = criterion(predictions_t, targets_t)
+                best_move_loss = (best_move_loss + best_move_t_loss) / 2
+
+                # Compute a loss about legals move (1 if legal 0 if not)
+                all_legal_moves = [[moves_dict[(self.encode_move(move))] for move in game.board.legal_moves] for game in batch_games]
+                legal_moves = [[int(i in legal_moves) for i in range(64*64*5)] for legal_moves in all_legal_moves]
+                legal_moves = torch.tensor(legal_moves, dtype=torch.float, device=self.module.device)
+                legal_loss = legal_criterion(predictions.float(), legal_moves.float())
+                num_legal_moves = legal_moves.sum(dim=1, keepdim=True).clamp(min=1)
+                legal_loss = (legal_loss / num_legal_moves).sum() * 0.01 # normalize by the number of legal moves
+
+                loss = best_move_loss + legal_loss
+                total_val_loss += loss.item()
+
+                pred = predictions.argmax(dim=1)
+                acc = (pred == targets).float().mean().item()
+                pred_t = predictions_t.argmax(dim=1)
+                acc_t = (pred_t == targets_t).float().mean().item()
+                correct += (acc + acc_t) / 2
+                
+            loss_val.append(total_val_loss / num_val_batches)
+            acc_val.append(correct / num_val_batches)
 
             if self._train_config["UI"] == 'prints':
                 l1 = f"  [{epoch + 1}/{epochs}] Loss: {total_loss / num_batches:.2f}, Best Move Loss: {total_best_move_loss / num_batches:.2f}, Contrastive loss {total_contrastive_loss / num_batches:.2f}" 
@@ -627,12 +747,17 @@ class DeepEngine(Engine):
                 print(f"| {'': <{TrainConfig.line_length-2}} |")
 
             if self._train_config["auto_save"]:
+                path = "backend/models/saves/"
+                if not os.path.exists(path) and os.path.exists("models/saves/"):
+                    path = "models/saves/"
+                elif not os.path.exists(path): raise Exception("Cannot find backend/models/saves")
+            
                 if self.auto_save_version is None:
-                    files = [f for f in os.listdir("backend/models/saves") if self.__class__.__name__ in f and "auto-save" in f]
+                    files = [f for f in os.listdir(path) if self.__class__.__name__ in f and "auto-save" in f]
                     self.auto_save_version = len(files)
-                self.save(element="all", path="backend/models/saves/" + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
+                self.save(element="all", path=path + self.__class__.__name__ + "-V" + str(self.auto_save_version) + ".auto-save.pth")
 
-        return all_total_loss, all_legal_loss, all_best_move_loss
+        return all_total_loss, loss_val, acc_train, acc_val, all_legal_loss, all_best_move_loss, "Training generation head"
 
     def _test_generation(self, games: list[Game], best_moves: list[chess.Move], loader: Loader = None):
 
@@ -655,7 +780,10 @@ class DeepEngine(Engine):
                     if i == j: continue
                     for k in range(5):
                         moves_dict[(i, j, k)] = len(moves_dict)
-            torch.save(moves_dict, "backend/data/moves_dict.pth")
+            if os.path.exists("backend/data/"):
+                torch.save(moves_dict, "backend/data/moves_dict.pth")
+            elif os.path.exists(".data/"):
+                torch.save(moves_dict, "./data/moves_dict.pth")
 
         self.module.eval()
         with torch.no_grad():

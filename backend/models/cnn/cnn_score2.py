@@ -1,96 +1,29 @@
 import numpy as np
 from models.deep_engine import DeepEngine
-from models.cnn.cnn_score import BoardEvaluator, GenerativeHead, ChessEmbedding, Decoder
-from models.cnn.cnn_toolbox import CrossAttention, CBAM, DepthwiseResBlock, RelativePositionalEncoding, SEAttention
+from models.cnn.cnn_toolbox import MultiHeadCrossAttention, CBAM, DepthwiseResBlock, RelativePositionalEncoding, SEAttention
 
 from src.chess.game import Game
-import os
+
 import chess
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import chess.syzygy 
 
-class SyzygyEvaluator:
-    def __init__(self, tb_dir):
-        self.tb_dir = tb_dir
-        self.tablebase = chess.syzygy.open_tablebase(tb_dir)
-
-    def evaluate(self, board: chess.Board):
-        if len(board.piece_map()) <= 7:
-            try:
-                wdl = self.tablebase.probe_wdl(board)
-                if wdl > 0:
-                    return 1.0
-                elif wdl == 0:
-                    return 0.5
-                else:
-                    return 0.0
-            except chess.syzygy.MissingTableError:
-                return None
-        return None
-
-
-class CNNScore2(DeepEngine):
+class CNNScoreTmp(DeepEngine):
     """
     CNN-based AI that scores the board state.
     """
 
-    __author__ = "Matt"
+    __author__ = "Enzo Pinchon"
     __description__ = "CNN-based AI that scores the board state."
-    __weights__ = "CNNScore"
         
     def __init__(self):
         super().__init__()
 
         self.set(head_name="board_evaluation", head=BoardEvaluator())
-        self.set(head_name="board_evaluation", head=BoardEvaluator())
         self.set(head_name="generative", head=GenerativeHead())
-        self.set(head_name="encoder", head=ChessEmbedding())
+        self.set(head_name="encoder", head=ChessEmbedding2())
         self.set(head_name="decoder", head=Decoder())
-    
-    
-    def play(self) -> chess.Move:
-        """
-        If Syzygy tablebases are available, returns the optimal move.
-        else use best CNN Move.
-        """
-        board = self.game.board
-        # Check if we can use Syzygy tablebases (position has 7 or fewer pieces)
-        if len(board.piece_map()) <= 7:
-            try:
-                moves = list(board.legal_moves)
-                best_move = None
-                best_score = -float('inf')
-                
-                for move in moves:
-                    board_copy = board.copy()
-                    board_copy.push(move)
-                    
-                    if not board_copy.is_game_over():
-                        score = self.syzygy_evaluator.evaluate(board_copy)
-                        
-                        if score is not None:
-                            opponent_score = 1.0 - score
-                            
-                            if opponent_score > best_score:
-                                best_score = opponent_score
-                                best_move = move
-                
-                # If we found a tablebase-optimal move, return it
-                if best_move:
-                    print("Best move found")
-                    return best_move
-                    
-            except Exception as e:
-                # Fall back to CNN on any error
-                pass
-        
-        scores = self.predict()
-        legal_moves = list(self.game.board.legal_moves)
-        scores = [scores[self.encode_move(move, as_int=True)] for move in legal_moves]
-        return legal_moves[scores.index(max(scores))]
-    
 
     
 class GenerativeHead(nn.Module):
@@ -106,15 +39,17 @@ class GenerativeHead(nn.Module):
         self.fc2_2 = nn.Linear(1024, 2048)
         self.shortcut1_2 = nn.Linear(512 + 256, 2048)
 
-        # cross attention
-        self.cross_attention = CrossAttention(2048)
+        self.gate_fc = nn.Linear(2048 * 2, 2048)
+        self.cross_attention = MultiHeadCrossAttention(2048, 4)
 
         self.projection = nn.Linear(2048, 64*64*5)
 
         # Normalization and Dropout
-        self.norm1 = nn.LayerNorm(1024)
-        self.norm2 = nn.LayerNorm(2048)
-        self.dropout = nn.Dropout(0.3)
+        self.norm1_1 = nn.LayerNorm(1024)
+        self.norm2_1 = nn.LayerNorm(2048)
+        self.norm1_2 = nn.LayerNorm(1024)
+        self.norm2_2 = nn.LayerNorm(2048)
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
         # MLP Expansion with Residual Connections
@@ -122,25 +57,35 @@ class GenerativeHead(nn.Module):
         shortcut1_2 = self.shortcut1_2(x)
 
         x_1 = F.relu(self.fc1(x))
-        x_1 = self.norm1(x_1)
+        x_1 = self.norm1_1(x_1)
         x_1 = self.dropout(x_1)
         x_1 = F.relu(self.fc2(x_1))
-        x_1 = self.norm2(x_1)
+        x_1 = self.norm2_1(x_1)
         x_1 += shortcut1
 
         x_2 = F.relu(self.fc1_2(x))
-        x_2 = self.norm1(x_2)
+        x_2 = self.norm1_2(x_2)
         x_2 = self.dropout(x_2)
         x_2 = F.relu(self.fc2_2(x_2))
-        x_2 = self.norm2(x_2)
+        x_2 = self.norm2_2(x_2)
         x_2 += shortcut1_2
 
-        # Cross Attention
-        x = self.cross_attention(x_1, x_2)
+        x_cat = torch.cat([x_1, x_2], dim=-1)  # shape: (batch, 4096)
+        gate = torch.sigmoid(self.gate_fc(x_cat))  # shape: (batch, 2048)
+
+        # Fuse the two branches using the learned gate:
+        # gate * x_1 + (1 - gate) * x_2
+        x_fused = gate * x_1 + (1 - gate) * x_2
+
+        # Compute cross attention (here using x₁ as query and x₂ as key/value)
+        x_cross = self.cross_attention(x_1, x_2)
+
+        # Combine the cross attention output with the gated fusion.
+        # This lets the model leverage both learned interactions and a direct fusion.
+        x_combined = x_cross + x_fused
 
         # Projection
-        x = self.projection(x)
-
+        x = self.projection(x_combined)
         return x
 
 class BoardEvaluator(nn.Module):
@@ -186,7 +131,7 @@ class HeatMap(nn.Module):
         x = torch.sigmoid(self.conv3(x))
         return x  # (batch, 1, 8, 8)
 
-class ChessEmbedding(nn.Module):
+class ChessEmbedding2(nn.Module):
     def __init__(self):
         super().__init__()
         self.pos_encoding = RelativePositionalEncoding(13) # avoid equivariance to translation
@@ -197,12 +142,12 @@ class ChessEmbedding(nn.Module):
         self.res4 = DepthwiseResBlock(512, 512, 3, 2, 1)
         self.res5 = DepthwiseResBlock(512, 1024, 3, 2, 1)
 
-        # CBAM Attention
-        self.cbam1 = CBAM(128)
-        self.cbam2 = CBAM(256)
-        self.cbam3 = CBAM(512)
-        self.cbam4 = CBAM(512)
-        self.cbam5 = CBAM(1024)
+        # # CBAM Attention
+        # self.cbam1 = CBAM(128)
+        # self.cbam2 = CBAM(256)
+        # self.cbam3 = CBAM(512)
+        # self.cbam4 = CBAM(512)
+        # self.cbam5 = CBAM(1024)
 
         # Heatmaps
         self.heatmap1 = HeatMap()
@@ -217,7 +162,7 @@ class ChessEmbedding(nn.Module):
 
     def forward(self, x):
         x = x.permute(0, 3, 1, 2)
-        # x = self.pos_encoding(x)
+        x = self.pos_encoding(x)
 
         heatmap1 = self.heatmap1(x)
         heatmap2 = self.heatmap2(x)
@@ -225,12 +170,12 @@ class ChessEmbedding(nn.Module):
         heatmap4 = self.heatmap4(x)
 
         # CNN + CBAM Attention
-        x = self.cbam1(self.res1(x))
-        x = self.cbam2(self.res2(x))
-        x = self.cbam3(self.res3(x))
+        x = self.res1(x)
+        x = self.res2(x)
+        x = self.res3(x)
         x = self.dropout(x)
-        x = self.cbam4(self.res4(x))
-        x = self.cbam5(self.res5(x))
+        x = self.res4(x)
+        x = self.res5(x)
 
         x = x.view(x.shape[0], -1)
         heatmaps = torch.cat([heatmap1, heatmap2, heatmap3, heatmap4], dim=1)

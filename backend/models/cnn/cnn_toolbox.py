@@ -46,7 +46,7 @@ class SEAttention(nn.Module):
         return x * w
 
 class DepthwiseResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, norm_type='batch'):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, norm_type='group'):
         super().__init__()
         
         self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, groups=in_channels, bias=False)
@@ -236,17 +236,40 @@ class SelfAttention(nn.Module):
         attention_scores = self.softmax(torch.matmul(Q, K.transpose(-2, -1)) / (x.size(-1) ** 0.5))
         return torch.matmul(attention_scores, V)
     
-class CrossAttention(nn.Module):
-    def __init__(self, embed_dim):
+class MultiHeadCrossAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads):
         super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        assert self.head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+        
         self.query = nn.Linear(embed_dim, embed_dim)
         self.key = nn.Linear(embed_dim, embed_dim)
         self.value = nn.Linear(embed_dim, embed_dim)
-        self.softmax = nn.Softmax(dim=-1)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
     
     def forward(self, x, y):
-        Q = self.query(x)
-        K = self.key(y)
-        V = self.value(y)
-        attention_scores = self.softmax(torch.matmul(Q, K.transpose(-2, -1)) / (x.size(-1) ** 0.5))
-        return torch.matmul(attention_scores, V)
+        batch_size = x.size(0)
+        
+        # Linear projections
+        Q = self.query(x)  # shape: (batch, len_x, embed_dim)
+        K = self.key(y)    # shape: (batch, len_y, embed_dim)
+        V = self.value(y)  # shape: (batch, len_y, embed_dim)
+        
+        # Split into heads and transpose: (batch, num_heads, len, head_dim)
+        Q = Q.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        # Scaled dot-product attention
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        attn = F.softmax(scores, dim=-1)
+        context = torch.matmul(attn, V)  # shape: (batch, num_heads, len_x, head_dim)
+        
+        # Concatenate heads
+        context = context.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_dim)
+        
+        # Final projection
+        output = self.out_proj(context)
+        return output.squeeze(1)

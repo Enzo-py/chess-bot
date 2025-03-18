@@ -1,6 +1,6 @@
 import numpy as np
 from models.deep_engine import DeepEngine
-from models.cnn.cnn_toolbox import CrossAttention, CBAM, DepthwiseResBlock, RelativePositionalEncoding, SEAttention
+from models.cnn.cnn_toolbox import MultiHeadCrossAttention, CBAM, DepthwiseResBlock, RelativePositionalEncoding, SEAttention
 
 from src.chess.game import Game
 
@@ -39,15 +39,17 @@ class GenerativeHead(nn.Module):
         self.fc2_2 = nn.Linear(1024, 2048)
         self.shortcut1_2 = nn.Linear(512 + 256, 2048)
 
-        # cross attention
-        self.cross_attention = CrossAttention(2048)
+        self.gate_fc = nn.Linear(2048 * 2, 2048)
+        self.cross_attention = MultiHeadCrossAttention(2048, 4)
 
         self.projection = nn.Linear(2048, 64*64*5)
 
         # Normalization and Dropout
-        self.norm1 = nn.LayerNorm(1024)
-        self.norm2 = nn.LayerNorm(2048)
-        self.dropout = nn.Dropout(0.3)
+        self.norm1_1 = nn.LayerNorm(1024)
+        self.norm2_1 = nn.LayerNorm(2048)
+        self.norm1_2 = nn.LayerNorm(1024)
+        self.norm2_2 = nn.LayerNorm(2048)
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
         # MLP Expansion with Residual Connections
@@ -55,25 +57,35 @@ class GenerativeHead(nn.Module):
         shortcut1_2 = self.shortcut1_2(x)
 
         x_1 = F.relu(self.fc1(x))
-        x_1 = self.norm1(x_1)
+        x_1 = self.norm1_1(x_1)
         x_1 = self.dropout(x_1)
         x_1 = F.relu(self.fc2(x_1))
-        x_1 = self.norm2(x_1)
+        x_1 = self.norm2_1(x_1)
         x_1 += shortcut1
 
         x_2 = F.relu(self.fc1_2(x))
-        x_2 = self.norm1(x_2)
+        x_2 = self.norm1_2(x_2)
         x_2 = self.dropout(x_2)
         x_2 = F.relu(self.fc2_2(x_2))
-        x_2 = self.norm2(x_2)
+        x_2 = self.norm2_2(x_2)
         x_2 += shortcut1_2
 
-        # Cross Attention
-        x = self.cross_attention(x_1, x_2)
+        x_cat = torch.cat([x_1, x_2], dim=-1)  # shape: (batch, 4096)
+        gate = torch.sigmoid(self.gate_fc(x_cat))  # shape: (batch, 2048)
+
+        # Fuse the two branches using the learned gate:
+        # gate * x_1 + (1 - gate) * x_2
+        x_fused = gate * x_1 + (1 - gate) * x_2
+
+        # Compute cross attention (here using x₁ as query and x₂ as key/value)
+        x_cross = self.cross_attention(x_1, x_2)
+
+        # Combine the cross attention output with the gated fusion.
+        # This lets the model leverage both learned interactions and a direct fusion.
+        x_combined = x_cross + x_fused
 
         # Projection
-        x = self.projection(x)
-
+        x = self.projection(x_combined)
         return x
 
 class BoardEvaluator(nn.Module):
@@ -150,7 +162,7 @@ class ChessEmbedding(nn.Module):
 
     def forward(self, x):
         x = x.permute(0, 3, 1, 2)
-        # x = self.pos_encoding(x)
+        x = self.pos_encoding(x)
 
         heatmap1 = self.heatmap1(x)
         heatmap2 = self.heatmap2(x)
