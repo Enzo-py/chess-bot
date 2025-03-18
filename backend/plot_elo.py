@@ -2,7 +2,7 @@ import json
 import matplotlib.pyplot as plt
 
 # Load the ranking data
-ranking_path = "data/ranking.json"
+ranking_path = "data/stockfish_eval_results.json"
 with open(ranking_path, "r") as f:
     ranking_data = json.load(f)
 
