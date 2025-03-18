@@ -7,9 +7,9 @@
 
 ### Backend
 - The chess game logic can be found in `backend/src/chess`.
-- To create a model (AI), create a new file in `backend/models` and inherit the model from `Algo` (`backend/models/algo.py Algo`).
+- To create a model (AI), create a new file in `backend/models` and inherit the model from `Engine` (`backend/models/engine.py Engine`).
 - To make a model available to the front interface, add it in `backend/meta.py AVAILABLE_MODELS`.
-- The backend communic to the frontend using a socket server (code in `backend/src/utils/`)
+- The backend communicates to the frontend using a socket server (code in `backend/src/utils/`)
 - The server backend is available in `backend/server.py`.
 
 ### Frontend
